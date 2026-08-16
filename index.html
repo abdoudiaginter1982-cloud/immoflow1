@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Immoflow — Gestion immobilière</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet" />
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/lucide-react@0.468.0/dist/umd/lucide-react.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+const ReactDOM = window.ReactDOM;
+const SUPABASE_URL = "";
+const SUPABASE_ANON_KEY = "";
+const supabase = (SUPABASE_URL && SUPABASE_ANON_KEY && window.supabase)
+  ? window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+  : null;
+const lucide = window.lucideReact || window.LucideReact || {};
+const fallbackIcon = ({ size = 18, color = "currentColor", ...props }) => React.createElement("span", { style: { display: "inline-flex", width: size, height: size, color, alignItems: "center", justifyContent: "center" }, ...props }, "•");
+const Plus = lucide.Plus || fallbackIcon;
+const X = lucide.X || fallbackIcon;
+const Phone = lucide.Phone || fallbackIcon;
+const MapPin = lucide.MapPin || fallbackIcon;
+const AlertCircle = lucide.AlertCircle || fallbackIcon;
+const CheckCircle2 = lucide.CheckCircle2 || fallbackIcon;
+const TrendingUp = lucide.TrendingUp || fallbackIcon;
+const Home = lucide.Home || fallbackIcon;
+const Users = lucide.Users || fallbackIcon;
+const LogOut = lucide.LogOut || fallbackIcon;
+const ArrowRight = lucide.ArrowRight || fallbackIcon;
+const Check = lucide.Check || fallbackIcon;
+const Menu = lucide.Menu || fallbackIcon;
+const Bell = lucide.Bell || fallbackIcon;
+
+const MONTHS = ["Jan", "Fév", "Mar", "Avr", "Mai", "Juin", "Juil", "Août", "Sep", "Oct", "Nov", "Déc"];
+const CURRENT_MONTH = 7;
+const NAVY = "#14213D";
+const GOLD = "#C9A227";
+const GREEN = "#2F6D4F";
+const RUST = "#B5432B";
+const LOGO_SRC = "data:image/jpeg;base64,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zziBcL3zzzzzynzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzyjzzzzzigJ2ePbzzzzynzzjvPfzzzzzzzzzzzzzzzzzzzwQoUZzzzzzzzzzzzzzzzzzzyjzzzz+uv7zw4PTzzzynzyyiwHDDDDDDzzjDDDDDzzDDDDJpSjzjDDDDDDDDDDzzzzzzyjzzzz8D3zzyy1bzzzynzzxXzzC0q8R2gPX714ZlSvkYTVSaOjh0aucEQMwsALzzzzzzyjzzzyxzzzzzzw/wA888p888V88r4I3g298+E29b8B/Kf8FXR0oDiIDaeDlZhrc8888888o88887T8y2x/RF8888p888V88ro8/BW98/VWpr8Bfqr4NXBUoVqeT+oZ93IP88888888o8888tOAX/qN+88888p88oqzzAjzz27xjTUChQzDBtyydvq39KBiBx8RGTx288888888o8888888uu98888888p888MMMMMMMMMMMMMMMMMc8MMcsMMMMMMMM88MMMMc88888888o88888888888888888p88844www44400w4444w0w44ow8448888888888888888888884c8888888888888888v8884cwEMMYU008cIIYgwEUosEcAk888888888888888888888sy888888888888888/0888sMMc88MMMscs8MsccMc8MsMss8888888888888888888888cZ88888888888887f8APPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPDO8888888888857PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP/EAAL/2gAMAwEAAgADAAAAEAABDBCDDDBCDDDADCAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABP3v8A/wD/AP8A/wD/AP8A/wDdqgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA/8A/wD/AP8A/wD/AP8A/wD/AP8A/wD9sgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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";
+
+const seedProperties = [];
+const seedTenants = [];
+
+function formatFCFA(n) {
+  return n.toLocaleString("fr-FR") + " FCFA";
+}
+
+function initials(name) {
+  return (name || "").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase();
+}
+
+function CollectionRing({ percent, size = 96, stroke = 9, color = GOLD, trackColor = "rgba(255,255,255,0.15)" }) {
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const clamped = Math.max(0, Math.min(percent, 100));
+  const offset = circumference - (clamped / 100) * circumference;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={trackColor} strokeWidth={stroke} />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke={color}
+        strokeWidth={stroke}
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        strokeLinecap="round"
+        transform={`rotate(-90 ${size / 2} ${size / 2})`}
+        style={{ transition: "stroke-dashoffset 0.6s ease" }}
+      />
+      <text x="50%" y="50%" textAnchor="middle" dominantBaseline="central" fill="white" fontSize={size * 0.22} fontWeight="700" fontFamily="'IBM Plex Mono', monospace">
+        {Math.round(clamped)}%
+      </text>
+    </svg>
+  );
+}
+
+/* ---------------------------- Landing page ---------------------------- */
+
+function Landing({ onLogin, onSignup, onSelectPlan }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  return (
+    <div style={{ fontFamily: "'Inter', sans-serif" }}>
+      <nav className="sticky top-0 z-40 bg-white border-b border-stone-200">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <img src={LOGO_SRC} alt="Immoflow — Gestion immobilière" className="h-12 w-auto object-contain" />
+          </div>
+          <div className="hidden md:flex items-center gap-8 text-sm font-medium" style={{ color: NAVY }}>
+            <a href="#fonctionnalites" className="hover:opacity-70">Fonctionnalités</a>
+            <a href="#tarifs" className="hover:opacity-70">Tarifs</a>
+          </div>
+          <div className="hidden md:flex items-center gap-3">
+            <button onClick={onLogin} className="text-sm font-medium px-3 py-2" style={{ color: NAVY }}>
+              Connexion
+            </button>
+            <button
+              onClick={onSignup}
+              className="text-sm font-medium px-4 py-2 rounded text-white"
+              style={{ backgroundColor: NAVY }}
+            >
+              Essayer gratuitement
+            </button>
+          </div>
+          <button className="md:hidden" onClick={() => setMenuOpen((v) => !v)}>
+            <Menu size={22} color={NAVY} />
+          </button>
+        </div>
+        {menuOpen && (
+          <div className="md:hidden border-t border-stone-200 px-6 py-3 flex flex-col gap-3">
+            <button onClick={onLogin} className="text-sm font-medium text-left" style={{ color: NAVY }}>Connexion</button>
+            <button onClick={onSignup} className="text-sm font-medium text-left px-4 py-2 rounded text-white w-fit" style={{ backgroundColor: NAVY }}>
+              Essayer gratuitement
+            </button>
+          </div>
+        )}
+      </nav>
+
+      <header style={{ backgroundColor: NAVY }} className="text-white">
+        <div className="max-w-6xl mx-auto px-6 py-20 text-center">
+          <span
+            className="inline-block px-3 py-1 rounded-full text-xs font-medium mb-5"
+            style={{ backgroundColor: "rgba(201,162,39,0.15)", color: GOLD, border: `1px solid ${GOLD}` }}
+          >
+            Pensé pour les agences et bailleurs au Sénégal
+          </span>
+          <h1
+            className="text-3xl sm:text-5xl font-bold mb-5 leading-tight max-w-3xl mx-auto"
+            style={{ fontFamily: "'Roboto Slab', serif" }}
+          >
+            Le suivi de vos loyers, sans carnet ni tableur
+          </h1>
+          <p className="text-stone-300 max-w-xl mx-auto mb-8 text-base sm:text-lg">
+            Centralisez vos biens, suivez chaque loyer payé ou en retard, et gagnez du temps —
+            que vous gériez 2 appartements ou tout un portefeuille.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+            <button
+              onClick={onSignup}
+              className="px-6 py-3 rounded font-medium flex items-center justify-center gap-2"
+              style={{ backgroundColor: GOLD, color: NAVY }}
+            >
+              Créer mon compte gratuit <ArrowRight size={16} />
+            </button>
+            <button
+              onClick={onLogin}
+              className="px-6 py-3 rounded font-medium border border-stone-500 text-white"
+            >
+              J'ai déjà un compte
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <section id="fonctionnalites" className="max-w-6xl mx-auto px-6 py-16">
+        <h2 className="text-2xl font-bold text-center mb-10" style={{ fontFamily: "'Roboto Slab', serif", color: NAVY }}>
+          Tout ce qu'il faut, rien de superflu
+        </h2>
+        <div className="grid sm:grid-cols-3 gap-6">
+          {[
+            { icon: Home, title: "Registre des biens", desc: "Centralisez tous vos biens et unités, quel que soit le nombre de propriétés que vous gérez." },
+            { icon: Users, title: "Suivi des locataires", desc: "Coordonnées, loyer, jour d'échéance — tout au même endroit, par bien ou vue d'ensemble." },
+            { icon: TrendingUp, title: "Statut des paiements", desc: "Un coup d'œil suffit pour voir qui a payé ce mois-ci et qui est en retard." },
+          ].map((f, i) => (
+            <div key={i} className="p-5 rounded-lg border border-stone-200 bg-white">
+              <div className="w-10 h-10 rounded flex items-center justify-center mb-3" style={{ backgroundColor: "#F2F4F3" }}>
+                <f.icon size={20} color={NAVY} />
+              </div>
+              <h3 className="font-semibold mb-1.5" style={{ color: NAVY }}>{f.title}</h3>
+              <p className="text-sm text-stone-500">{f.desc}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section id="tarifs" style={{ backgroundColor: "#F2F4F3" }} className="py-16">
+        <div className="max-w-5xl mx-auto px-6">
+          <h2 className="text-2xl font-bold text-center mb-10" style={{ fontFamily: "'Roboto Slab', serif", color: NAVY }}>
+            Tarifs simples, sans surprise
+          </h2>
+          <div className="grid sm:grid-cols-3 gap-6">
+            {[
+              { id: "starter", name: "Starter", price: "5 000 FCFA/mois", desc: "Pour démarrer", features: ["Jusqu'à 3 biens", "Suivi des paiements", "1 utilisateur"], cta: "Commencer", waveLink: "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=5000" },
+              { id: "pro", name: "Pro", price: "10 000 FCFA/mois", desc: "Pour les bailleurs actifs", features: ["Jusqu'à 10 biens", "Rappels automatiques", "3 utilisateurs"], cta: "Choisir Pro", highlight: true, waveLink: "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=10000" },
+              { id: "agence", name: "Agence", price: "25 000 FCFA/mois", desc: "Pour les agences immobilières", features: ["Biens illimités (10+)", "Vue par propriétaire", "Utilisateurs illimités"], cta: "Choisir Agence", waveLink: "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=25000" },
+            ].map((plan, i) => (
+              <div
+                key={i}
+                className="rounded-lg p-6 bg-white flex flex-col"
+                style={plan.highlight ? { border: `2px solid ${GOLD}` } : { border: "1px solid #e7e5e4" }}
+              >
+                {plan.highlight && (
+                  <span className="text-xs font-semibold mb-2 w-fit px-2 py-0.5 rounded-full" style={{ backgroundColor: GOLD, color: NAVY }}>
+                    Populaire
+                  </span>
+                )}
+                <h3 className="font-semibold text-lg" style={{ color: NAVY, fontFamily: "'Roboto Slab', serif" }}>{plan.name}</h3>
+                <div className="text-xl font-bold my-2" style={{ color: NAVY, fontFamily: "'IBM Plex Mono', monospace" }}>{plan.price}</div>
+                <p className="text-sm text-stone-500 mb-4">{plan.desc}</p>
+                <ul className="space-y-2 mb-6 flex-1">
+                  {plan.features.map((f, j) => (
+                    <li key={j} className="flex items-center gap-2 text-sm text-stone-600">
+                      <Check size={14} color={GREEN} /> {f}
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  onClick={() => onSelectPlan(plan)}
+                  className="w-full py-2 rounded font-medium text-sm"
+                  style={plan.highlight ? { backgroundColor: NAVY, color: "white" } : { border: `1px solid ${NAVY}`, color: NAVY }}
+                >
+                  {plan.cta}
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      <footer style={{ backgroundColor: NAVY }} className="text-stone-400 text-sm py-8 text-center">
+        © 2026 Immoflow — gestion immobilière simplifiée.
+      </footer>
+    </div>
+  );
+}
+
+/* ------------------------------ Checkout ------------------------------ */
+
+function Checkout({ plan, onComplete, onBack }) {
+  const [status, setStatus] = useState("instructions");
+
+  const confirmPaid = () => {
+    setStatus("done");
+    setTimeout(() => onComplete(plan), 900);
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: "#F2F4F3", fontFamily: "'Inter', sans-serif" }}>
+      <div className="bg-white rounded-lg shadow-sm border border-stone-200 p-8 w-full max-w-sm">
+        {status === "instructions" && (
+          <button onClick={onBack} className="text-xs text-stone-400 mb-4">&larr; Retour</button>
+        )}
+        <div className="flex items-center gap-2.5 mb-6">
+          <img src={LOGO_SRC} alt="Immoflow — Gestion immobilière" className="h-12 w-auto object-contain" />
+        </div>
+
+        {status === "done" ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ backgroundColor: "#eaf3ee" }}>
+              <CheckCircle2 size={28} color={GREEN} />
+            </div>
+            <h2 className="font-semibold text-lg" style={{ color: NAVY }}>Paiement confirmé</h2>
+            <p className="text-sm text-stone-500 mt-1">Plan {plan.name} activé — {plan.price}</p>
+          </div>
+        ) : status === "pending" ? (
+          <div className="text-center py-6">
+            <div className="w-12 h-12 rounded-full flex items-center justify-center mx-auto mb-3" style={{ backgroundColor: "#eaf3ee" }}>
+              <CheckCircle2 size={28} color={GREEN} />
+            </div>
+            <h2 className="font-semibold text-lg mb-1" style={{ color: NAVY }}>Lien Wave ouvert</h2>
+            <p className="text-sm text-stone-500 mb-5">Confirmez le paiement dans l'app Wave, puis revenez ici.</p>
+            <button
+              onClick={confirmPaid}
+              className="w-full py-2.5 rounded font-medium text-white text-sm"
+              style={{ backgroundColor: NAVY }}
+            >
+              J'ai confirmé le paiement dans Wave
+            </button>
+          </div>
+        ) : (
+          <>
+            <h2 className="font-semibold text-lg mb-1" style={{ color: NAVY }}>Paiement de l'abonnement</h2>
+            <div className="rounded border border-stone-200 p-3 mb-5 flex items-center justify-between" style={{ backgroundColor: "#FAF9F7" }}>
+              <div>
+                <div className="text-sm font-medium" style={{ color: NAVY }}>Plan {plan.name}</div>
+                <div className="text-xs text-stone-500">Facturation mensuelle</div>
+              </div>
+              <div className="font-semibold text-sm" style={{ fontFamily: "'IBM Plex Mono', monospace", color: NAVY }}>{plan.price}</div>
+            </div>
+
+            <p className="text-sm text-stone-500 mb-5">
+              Cliquez ci-dessous pour payer directement via Wave — le montant est déjà pré-rempli.
+            </p>
+
+            <a
+              href={plan.waveLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setStatus("pending")}
+              className="w-full py-2.5 rounded font-medium text-white text-sm flex items-center justify-center gap-2"
+              style={{ backgroundColor: "#1DC8E8" }}
+            >
+              Payer {plan.price} avec Wave
+            </a>
+            <p className="text-[11px] text-stone-300 text-center mt-3">
+              Votre abonnement est activé dès que le paiement est confirmé.
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------ Auth form ------------------------------ */
+
+function AuthPage({ mode, onSubmit, onSwitch, onBack }) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  return (
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: "#F2F4F3", fontFamily: "'Inter', sans-serif" }}>
+      <div className="bg-white rounded-lg shadow-sm border border-stone-200 p-8 w-full max-w-sm">
+        <button onClick={onBack} className="text-xs text-stone-400 mb-4">&larr; Retour au site</button>
+        <div className="flex items-center gap-2.5 mb-6">
+          <img src={LOGO_SRC} alt="Immoflow — Gestion immobilière" className="h-12 w-auto object-contain" />
+        </div>
+        <h2 className="font-semibold text-lg mb-1" style={{ color: NAVY }}>
+          {mode === "login" ? "Connexion" : "Créer un compte"}
+        </h2>
+        <p className="text-sm text-stone-500 mb-5">
+          {mode === "login" ? "Accédez à votre espace de gestion." : "Démarrez gratuitement, sans carte bancaire."}
+        </p>
+        <div className="space-y-3">
+          {mode === "signup" && (
+            <input
+              className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+              placeholder="Nom de l'agence ou votre nom"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
+          )}
+          <input
+            type="email"
+            className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+            placeholder="Adresse e-mail"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+          <input
+            type="password"
+            className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+            placeholder="Mot de passe"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </div>
+        <button
+          onClick={() => onSubmit({ name: name || "Mon agence", email })}
+          className="w-full mt-5 py-2.5 rounded font-medium text-white text-sm"
+          style={{ backgroundColor: NAVY }}
+        >
+          {mode === "login" ? "Se connecter" : "Créer mon compte"}
+        </button>
+        <p className="text-xs text-stone-400 text-center mt-4">
+          {mode === "login" ? (
+            <>Pas encore de compte ? <button onClick={() => onSwitch("signup")} className="underline">Inscrivez-vous</button></>
+          ) : (
+            <>Déjà un compte ? <button onClick={() => onSwitch("login")} className="underline">Connectez-vous</button></>
+          )}
+        </p>
+        <p className="text-[11px] text-stone-300 text-center mt-3">
+          Démo : aucune donnée n'est réellement enregistrée sur un serveur.
+        </p>
+      </div>
+    </div>
+  );
+}
+
+/* ----------------------------- Dashboard UI ----------------------------- */
+
+function StampCell({ paid, isCurrent, isFuture }) {
+  if (isFuture) return <div className="w-6 h-6 rounded-sm border border-dashed border-stone-300" />;
+  if (paid) {
+    return (
+      <div className="w-6 h-6 rounded-sm flex items-center justify-center text-white" style={{ backgroundColor: GREEN }} title="Payé">
+        <CheckCircle2 size={14} strokeWidth={2.5} />
+      </div>
+    );
+  }
+  return (
+    <div className={`w-6 h-6 rounded-sm flex items-center justify-center border-2 ${isCurrent ? "animate-pulse" : ""}`} style={{ borderColor: RUST, color: RUST }} title="Impayé">
+      <X size={14} strokeWidth={3} />
+    </div>
+  );
+}
+
+function AddPropertyForm({ onAdd, onClose }) {
+  const [name, setName] = useState("");
+  const [address, setAddress] = useState("");
+  const [type, setType] = useState("Appartements");
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-semibold text-lg" style={{ fontFamily: "'Roboto Slab', serif", color: NAVY }}>Nouveau bien</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600"><X size={20} /></button>
+        </div>
+        <div className="space-y-3">
+          <input className="w-full border border-stone-300 rounded px-3 py-2 text-sm" placeholder="Nom du bien (ex: Résidence Fann)" value={name} onChange={(e) => setName(e.target.value)} />
+          <input className="w-full border border-stone-300 rounded px-3 py-2 text-sm" placeholder="Adresse" value={address} onChange={(e) => setAddress(e.target.value)} />
+          <select className="w-full border border-stone-300 rounded px-3 py-2 text-sm" value={type} onChange={(e) => setType(e.target.value)}>
+            <option>Appartements</option><option>Villa</option><option>Studio</option><option>Local commercial</option>
+          </select>
+        </div>
+        <button
+          className="w-full mt-4 py-2 rounded font-medium text-white text-sm"
+          style={{ backgroundColor: NAVY }}
+          onClick={() => { if (!name.trim()) return; onAdd({ id: "p" + Date.now(), name, address, type }); onClose(); }}
+        >
+          Ajouter le bien
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function FormField({ label, required, children }) {
+  return (
+    <label className="block flex-1 min-w-0">
+      <span className="block text-xs font-medium text-stone-500 mb-1">
+        {label}{required && <span style={{ color: RUST }}> *</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+function AddTenantForm({ properties, defaultLieu, defaultType, onAdd, onClose }) {
+  const [name, setName] = useState("");
+  const [phone, setPhone] = useState("");
+  const [email, setEmail] = useState("");
+  const [cni, setCni] = useState("");
+  const [apartmentType, setApartmentType] = useState(defaultType || "Appartement");
+  const [lieu, setLieu] = useState(defaultLieu || "");
+  const [unit, setUnit] = useState("");
+  const [moveInDate, setMoveInDate] = useState("");
+  const [rent, setRent] = useState("");
+  const [deposit, setDeposit] = useState("");
+  const [dueDay, setDueDay] = useState("5");
+  const [notes, setNotes] = useState("");
+
+  const inputCls = "w-full border border-stone-300 rounded px-3 py-2 text-sm";
+
+  const handleSubmit = () => {
+    if (!name.trim() || !lieu.trim() || String(rent).trim() === "") return;
+    onAdd({
+      name: name.trim(),
+      phone: phone.trim(),
+      email: email.trim(),
+      cni: cni.trim(),
+      apartmentType,
+      lieu: lieu.trim(),
+      unit: unit.trim(),
+      moveInDate,
+      rent: Number(rent),
+      deposit: deposit ? Number(deposit) : 0,
+      dueDay: Number(dueDay) || 5,
+      notes: notes.trim(),
+    });
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" onClick={onClose}>
+      <div className="bg-white rounded-lg p-6 w-full max-w-lg shadow-xl max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="font-semibold text-lg" style={{ fontFamily: "'Roboto Slab', serif", color: NAVY }}>Nouveau locataire</h3>
+          <button onClick={onClose} className="text-stone-400 hover:text-stone-600"><X size={20} /></button>
+        </div>
+
+        <div className="text-xs font-semibold uppercase tracking-wide text-stone-400 mb-2">Identité du locataire</div>
+        <div className="space-y-3 mb-4">
+          <FormField label="Nom complet" required>
+            <input className={inputCls} placeholder="ex: Fatou Ndiaye" value={name} onChange={(e) => setName(e.target.value)} />
+          </FormField>
+          <div className="flex gap-3">
+            <FormField label="Téléphone">
+              <input className={inputCls} placeholder="ex: 77 123 45 67" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            </FormField>
+            <FormField label="CNI / Pièce d'identité">
+              <input className={inputCls} placeholder="Numéro" value={cni} onChange={(e) => setCni(e.target.value)} />
+            </FormField>
+          </div>
+          <FormField label="E-mail">
+            <input type="email" className={inputCls} placeholder="ex: fatou@email.com" value={email} onChange={(e) => setEmail(e.target.value)} />
+          </FormField>
+        </div>
+
+        <div className="text-xs font-semibold uppercase tracking-wide text-stone-400 mb-2">Logement loué</div>
+        <div className="space-y-3 mb-4">
+          <div className="flex gap-3">
+            <FormField label="Type d'appartement" required>
+              <select className={inputCls} value={apartmentType} onChange={(e) => setApartmentType(e.target.value)}>
+                <option>Appartement</option><option>Studio</option><option>Villa</option><option>Chambre</option><option>Local commercial</option>
+              </select>
+            </FormField>
+            <FormField label="Nom / numéro d'appartement">
+              <input className={inputCls} placeholder="ex: Apt 3C, Studio 2" value={unit} onChange={(e) => setUnit(e.target.value)} />
+            </FormField>
+          </div>
+          <FormField label="Lieu (quartier, ville ou adresse)" required>
+            <input className={inputCls} placeholder="ex: Résidence Fann, Dakar" value={lieu} onChange={(e) => setLieu(e.target.value)} list="lieux-existants" />
+            <datalist id="lieux-existants">
+              {properties.map((p) => <option key={p.id} value={p.name} />)}
+            </datalist>
+          </FormField>
+        </div>
+
+        <div className="text-xs font-semibold uppercase tracking-wide text-stone-400 mb-2">Bail et loyer</div>
+        <div className="space-y-3 mb-4">
+          <div className="flex gap-3">
+            <FormField label="Loyer mensuel (FCFA)" required>
+              <input type="number" className={inputCls} placeholder="ex: 120000" value={rent} onChange={(e) => setRent(e.target.value)} />
+            </FormField>
+            <FormField label="Jour d'échéance">
+              <input type="number" min="1" max="28" className={inputCls} value={dueDay} onChange={(e) => setDueDay(e.target.value)} />
+            </FormField>
+          </div>
+          <div className="flex gap-3">
+            <FormField label="Caution / dépôt de garantie (FCFA)">
+              <input type="number" className={inputCls} placeholder="ex: 120000" value={deposit} onChange={(e) => setDeposit(e.target.value)} />
+            </FormField>
+            <FormField label="Date d'entrée">
+              <input type="date" className={inputCls} value={moveInDate} onChange={(e) => setMoveInDate(e.target.value)} />
+            </FormField>
+          </div>
+          <FormField label="Notes">
+            <textarea className={inputCls} rows={2} placeholder="Informations complémentaires (facultatif)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+          </FormField>
+        </div>
+
+        <button
+          className="w-full mt-1 py-2 rounded font-medium text-white text-sm"
+          style={{ backgroundColor: NAVY }}
+          onClick={handleSubmit}
+        >
+          Ajouter le locataire
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function Dashboard({ account, onLogout }) {
+  const [properties, setProperties] = useState(seedProperties);
+  const [tenants, setTenants] = useState(seedTenants);
+  const [selectedPropertyId, setSelectedPropertyId] = useState("all");
+  const [showAddProperty, setShowAddProperty] = useState(false);
+  const [showAddTenant, setShowAddTenant] = useState(false);
+
+  const handleAddTenantClick = () => setShowAddTenant(true);
+
+  const findOrCreateProperty = (lieu, type) => {
+    const trimmed = lieu.trim();
+    const existing = properties.find((p) => p.name.trim().toLowerCase() === trimmed.toLowerCase());
+    if (existing) return existing.id;
+    const newProperty = { id: "p" + Date.now(), name: trimmed, address: trimmed, type };
+    setProperties((prev) => [...prev, newProperty]);
+    return newProperty.id;
+  };
+
+  const handleTenantAdd = (data) => {
+    const { apartmentType, lieu, ...rest } = data;
+    const propertyId = findOrCreateProperty(lieu, apartmentType);
+    setTenants((prev) => [...prev, { ...rest, id: "t" + Date.now(), propertyId, payments: {} }]);
+  };
+
+  const togglePayment = (tenantId, monthIdx) => {
+    setTenants((prev) => prev.map((t) => t.id === tenantId ? { ...t, payments: { ...t.payments, [monthIdx]: !t.payments[monthIdx] } } : t));
+  };
+
+  const visibleTenants = useMemo(() => selectedPropertyId === "all" ? tenants : tenants.filter((t) => t.propertyId === selectedPropertyId), [tenants, selectedPropertyId]);
+
+  const stats = useMemo(() => {
+    const collected = visibleTenants.reduce((sum, t) => sum + (t.payments[CURRENT_MONTH] ? t.rent : 0), 0);
+    const expected = visibleTenants.reduce((sum, t) => sum + t.rent, 0);
+    const late = visibleTenants.filter((t) => !t.payments[CURRENT_MONTH]).length;
+    return { collected, expected, late, total: visibleTenants.length };
+  }, [visibleTenants]);
+
+  const trend = useMemo(() => {
+    const start = Math.max(0, CURRENT_MONTH - 5);
+    const expected = visibleTenants.reduce((sum, t) => sum + t.rent, 0);
+    const months = [];
+    for (let i = start; i <= CURRENT_MONTH; i++) {
+      const collected = visibleTenants.reduce((sum, t) => sum + (t.payments[i] ? t.rent : 0), 0);
+      months.push({ idx: i, label: MONTHS[i], rate: expected > 0 ? Math.round((collected / expected) * 100) : 0 });
+    }
+    return months;
+  }, [visibleTenants]);
+
+  const lateTenants = useMemo(() => visibleTenants.filter((t) => !t.payments[CURRENT_MONTH]), [visibleTenants]);
+
+  const propertyName = (id) => properties.find((p) => p.id === id)?.name || "";
+
+  return (
+    <div className="min-h-screen" style={{ backgroundColor: "#F2F4F3", fontFamily: "'Inter', sans-serif" }}>
+      <header style={{ backgroundColor: NAVY }} className="text-white">
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <img src={LOGO_SRC} alt="Immoflow — Gestion immobilière" className="h-12 w-auto object-contain" />
+            <div>
+              <div className="font-semibold text-lg leading-none" style={{ fontFamily: "'Roboto Slab', serif" }}>Immoflow</div>
+              <div className="text-xs text-stone-300">{account.name}{account.plan ? ` · Plan ${account.plan}` : ""}</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="hidden sm:inline text-xs text-stone-300 px-2 py-1 rounded-sm border border-stone-500" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+              {MONTHS[CURRENT_MONTH]} 2026
+            </span>
+            <button onClick={onLogout} className="text-xs flex items-center gap-1 text-stone-300 hover:text-white">
+              <LogOut size={14} /> Déconnexion
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        <div className="rounded-xl p-6 mb-6 text-white relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${NAVY} 0%, #0a1226 100%)` }}>
+          <div className="flex flex-col sm:flex-row items-center sm:items-stretch justify-between gap-6">
+            <div>
+              <div className="text-xs uppercase tracking-wide text-stone-300 mb-1" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>
+                {MONTHS[CURRENT_MONTH]} 2026 · Vue d'ensemble
+              </div>
+              <h2 className="text-2xl font-bold mb-1" style={{ fontFamily: "'Roboto Slab', serif" }}>
+                {stats.total === 0
+                  ? "Bienvenue sur votre espace"
+                  : stats.late === 0
+                  ? "Tout est à jour 🎉"
+                  : `${stats.late} loyer${stats.late > 1 ? "s" : ""} en attente`}
+              </h2>
+              <p className="text-sm text-stone-300 max-w-sm">
+                {stats.total === 0
+                  ? "Ajoutez votre premier locataire pour voir vos statistiques ici."
+                  : `${formatFCFA(stats.collected)} encaissés sur ${formatFCFA(stats.expected)} attendus.`}
+              </p>
+              <div className="flex gap-6 mt-5">
+                <div>
+                  <div className="text-2xl font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{properties.length}</div>
+                  <div className="text-xs text-stone-300 flex items-center gap-1"><Home size={12} /> Biens</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace" }}>{stats.total}</div>
+                  <div className="text-xs text-stone-300 flex items-center gap-1"><Users size={12} /> Locataires</div>
+                </div>
+                <div>
+                  <div className="text-2xl font-semibold" style={{ fontFamily: "'IBM Plex Mono', monospace", color: stats.late > 0 ? "#ff9c7a" : "white" }}>{stats.late}</div>
+                  <div className="text-xs text-stone-300 flex items-center gap-1"><AlertCircle size={12} /> Retards</div>
+                </div>
+              </div>
+            </div>
+            <div className="flex flex-col items-center justify-center">
+              <CollectionRing percent={stats.expected > 0 ? (stats.collected / stats.expected) * 100 : 0} />
+              <div className="text-xs text-stone-300 mt-2">Taux de recouvrement</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-3 gap-4 mb-8">
+          <div className="md:col-span-2 bg-white rounded-lg border border-stone-200 p-5">
+            <div className="flex items-center gap-2 mb-4 text-sm font-medium" style={{ color: NAVY }}>
+              <TrendingUp size={16} /> Tendance des encaissements
+            </div>
+            {stats.total === 0 ? (
+              <p className="text-sm text-stone-400 py-10 text-center">Les données apparaîtront ici dès votre premier locataire.</p>
+            ) : (
+              <div className="flex items-end gap-3 h-36">
+                {trend.map((m) => (
+                  <div key={m.idx} className="flex-1 flex flex-col items-center gap-2 h-full">
+                    <div className="w-full rounded-t-sm flex items-end flex-1" style={{ backgroundColor: "#F2F4F3" }}>
+                      <div
+                        className="w-full rounded-t-sm transition-all"
+                        style={{
+                          height: `${Math.max(Math.min(m.rate, 100), m.rate > 0 ? 4 : 0)}%`,
+                          backgroundColor: m.idx === CURRENT_MONTH ? GOLD : m.rate >= 100 ? GREEN : m.rate === 0 ? "#e7e5e4" : RUST,
+                        }}
+                        title={`${m.label} : ${m.rate}%`}
+                      />
+                    </div>
+                    <div className="text-[11px]" style={{ color: m.idx === CURRENT_MONTH ? NAVY : "#a8a29e", fontWeight: m.idx === CURRENT_MONTH ? 600 : 400 }}>
+                      {m.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="bg-white rounded-lg border border-stone-200 p-5">
+            <div className="flex items-center gap-2 mb-4 text-sm font-medium" style={{ color: NAVY }}>
+              <Bell size={16} /> À relancer
+            </div>
+            {lateTenants.length === 0 ? (
+              <div className="text-center py-8">
+                <CheckCircle2 size={26} color={GREEN} className="mx-auto mb-2" />
+                <p className="text-sm text-stone-400">{stats.total === 0 ? "Aucun locataire pour le moment" : "Aucun retard ce mois-ci"}</p>
+              </div>
+            ) : (
+              <div className="space-y-3 max-h-40 overflow-y-auto pr-1">
+                {lateTenants.slice(0, 6).map((t) => (
+                  <div key={t.id} className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white shrink-0" style={{ backgroundColor: RUST }}>
+                      {initials(t.name)}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <div className="text-sm font-medium truncate" style={{ color: NAVY }}>{t.name}</div>
+                      <div className="text-xs text-stone-400 truncate">{propertyName(t.propertyId)}{t.unit ? ` · ${t.unit}` : ""}</div>
+                    </div>
+                    {t.phone && (
+                      <a href={`tel:${t.phone}`} className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: "#FAF9F7" }} title={`Appeler ${t.name}`}>
+                        <Phone size={12} color={NAVY} />
+                      </a>
+                    )}
+                  </div>
+                ))}
+                {lateTenants.length > 6 && <div className="text-xs text-stone-400 text-center pt-1">+{lateTenants.length - 6} autres</div>}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setSelectedPropertyId("all")} className="px-3 py-1.5 rounded-full text-sm border transition"
+              style={selectedPropertyId === "all" ? { backgroundColor: NAVY, color: "white", borderColor: NAVY } : { backgroundColor: "white", color: NAVY, borderColor: "#d6d3d1" }}>
+              Tous les biens
+            </button>
+            {properties.map((p) => (
+              <button key={p.id} onClick={() => setSelectedPropertyId(p.id)} className="px-3 py-1.5 rounded-full text-sm border transition flex items-center gap-1.5"
+                style={selectedPropertyId === p.id ? { backgroundColor: NAVY, color: "white", borderColor: NAVY } : { backgroundColor: "white", color: NAVY, borderColor: "#d6d3d1" }}>
+                <MapPin size={12} /> {p.name}
+              </button>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowAddProperty(true)} className="px-3 py-1.5 rounded text-sm font-medium border flex items-center gap-1.5" style={{ borderColor: NAVY, color: NAVY }}>
+              <Plus size={14} /> Ajouter un bien
+            </button>
+            <button
+              onClick={handleAddTenantClick}
+              className="px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5"
+              style={{ backgroundColor: GOLD, color: NAVY }}
+              title="Ajouter un locataire"
+            >
+              <Plus size={14} /> Ajouter un locataire
+            </button>
+          </div>
+        </div>
+
+        {properties.length === 0 ? (
+          <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
+            <Home size={30} className="mx-auto mb-3" color={NAVY} />
+            <h3 className="font-semibold text-lg mb-2" style={{ color: NAVY }}>Votre espace est vide</h3>
+            <p className="text-sm text-stone-500 max-w-md mx-auto mb-5">
+              Ajoutez votre premier locataire pour commencer — le bien est créé automatiquement à partir du lieu que vous indiquez.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 justify-center">
+              <button onClick={() => setShowAddProperty(true)} className="px-4 py-2 rounded text-sm font-medium text-white" style={{ backgroundColor: NAVY }}>
+                <Plus size={14} className="inline mr-1" /> Ajouter mon premier bien
+              </button>
+              <button onClick={handleAddTenantClick} className="px-4 py-2 rounded text-sm font-medium border" style={{ borderColor: NAVY, color: NAVY }}>
+                <Plus size={14} className="inline mr-1" /> Ajouter un locataire
+              </button>
+            </div>
+          </div>
+        ) : (
+        <div className="bg-white rounded-lg border border-stone-200 overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-stone-200" style={{ backgroundColor: "#FAF9F7" }}>
+                  <th className="text-left py-3 px-4 font-medium text-stone-500 text-xs uppercase tracking-wide">Locataire</th>
+                  {MONTHS.map((m, idx) => (
+                    <th key={m} className="py-3 px-1 font-medium text-xs text-center" style={{ color: idx === CURRENT_MONTH ? GOLD : "#a8a29e", fontFamily: "'IBM Plex Mono', monospace" }}>{m}</th>
+                  ))}
+                  <th className="text-right py-3 px-4 font-medium text-stone-500 text-xs uppercase tracking-wide">Loyer</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleTenants.length === 0 && (
+                  <tr><td colSpan={14} className="text-center py-10 text-stone-400 text-sm">Aucun locataire pour ce bien. Ajoute-en un pour commencer le suivi.</td></tr>
+                )}
+                {visibleTenants.map((t) => (
+                  <tr key={t.id} className="border-b border-stone-100 last:border-0">
+                    <td className="py-3 px-4">
+                      <div className="font-medium" style={{ color: NAVY }}>{t.name}</div>
+                      <div className="text-xs text-stone-400 flex items-center gap-2 mt-0.5">
+                        <span>{t.unit}</span>
+                        {selectedPropertyId === "all" && <span className="text-stone-300">· {propertyName(t.propertyId)}</span>}
+                      </div>
+                      {t.phone && <div className="text-xs text-stone-400 flex items-center gap-1 mt-0.5"><Phone size={10} /> {t.phone}</div>}
+                    </td>
+                    {MONTHS.map((_, idx) => (
+                      <td key={idx} className="py-3 px-1 text-center">
+                        <button onClick={() => idx <= CURRENT_MONTH && togglePayment(t.id, idx)} className="mx-auto block" disabled={idx > CURRENT_MONTH}>
+                          <StampCell paid={!!t.payments[idx]} isCurrent={idx === CURRENT_MONTH} isFuture={idx > CURRENT_MONTH} />
+                        </button>
+                      </td>
+                    ))}
+                    <td className="py-3 px-4 text-right font-medium" style={{ fontFamily: "'IBM Plex Mono', monospace", color: NAVY }}>{formatFCFA(t.rent)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
+        <p className="text-xs text-stone-400 mt-3">Les données affichées proviennent uniquement des informations saisies par l'utilisateur.</p>
+      </main>
+
+      {showAddProperty && <AddPropertyForm onAdd={(p) => setProperties((prev) => [...prev, p])} onClose={() => setShowAddProperty(false)} />}
+      {showAddTenant && (
+        <AddTenantForm
+          properties={properties}
+          defaultLieu={selectedPropertyId !== "all" ? propertyName(selectedPropertyId) : undefined}
+          onAdd={handleTenantAdd}
+          onClose={() => setShowAddTenant(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/* -------------------------------- App root ------------------------------- */
+
+function App() {
+  const [view, setView] = useState("landing");
+  const [account, setAccount] = useState(null);
+  const [selectedPlan, setSelectedPlan] = useState(null);
+
+  const handleAuth = (data) => {
+    setAccount({ name: data.name || "Mon compte" });
+    setView(selectedPlan ? "checkout" : "dashboard");
+  };
+
+  const handlePlanSelect = (plan) => {
+    setSelectedPlan(plan);
+    setView("signup");
+  };
+
+  const handlePaymentComplete = (plan) => {
+    setAccount((prev) => ({ ...(prev || {}), plan: plan.name }));
+    setView("dashboard");
+  };
+
+  if (view === "dashboard" && account) {
+    return <Dashboard account={account} onLogout={() => { setAccount(null); setSelectedPlan(null); setView("landing"); }} />;
+  }
+  if (view === "checkout" && selectedPlan) {
+    return <Checkout plan={selectedPlan} onComplete={handlePaymentComplete} onBack={() => setView("landing")} />;
+  }
+  if (view === "login" || view === "signup") {
+    return (
+      <AuthPage
+        mode={view}
+        onSubmit={handleAuth}
+        onSwitch={(m) => setView(m)}
+        onBack={() => setView("landing")}
+      />
+    );
+  }
+  return <Landing onLogin={() => setView("login")} onSignup={() => setView("signup")} onSelectPlan={handlePlanSelect} />;
+}
+
+const root = document.getElementById("root");
+if (root) ReactDOM.createRoot(root).render(<App />);
+</script>
+</body>
+</html>
