@@ -1,0 +1,8 @@
+name = "immoflow1"
+main = "worker.js"
+compatibility_date = "2026-08-22"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "immoflow1"
+database_id = "704de764-c983-4f13-9804-c017e99b0ae7"
