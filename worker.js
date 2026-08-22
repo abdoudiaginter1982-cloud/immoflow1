@@ -1023,7 +1023,6 @@ async function api(request, env, url) {
     await createNotification(
       db,
       uid,
-      "payment",
       "Paiement enregistré",
       "Le paiement du loyer a été enregistré.",
       "payment"
@@ -3011,27 +3010,27 @@ document
 
 <tbody>
 
-${data.map(p=>`
+\${data.map(p=>\`
 
 <tr>
 
-<td>${escapeHtml(p.reference)}</td>
+<td>\${escapeHtml(p.reference)}</td>
 
-<td>${escapeHtml(p.title)}</td>
+<td>\${escapeHtml(p.title)}</td>
 
-<td>${escapeHtml(p.owner_name||"—")}</td>
+<td>\${escapeHtml(p.owner_name||"—")}</td>
 
-<td>${escapeHtml(p.type||"")}</td>
+<td>\${escapeHtml(p.type||"")}</td>
 
 <td>
-${Number(p.rent||0).toLocaleString("fr-FR")} FCFA
+\${Number(p.rent||0).toLocaleString("fr-FR")} FCFA
 </td>
 
-<td>${escapeHtml(p.status)}</td>
+<td>\${escapeHtml(p.status)}</td>
 
 </tr>
 
-`).join("")}
+\`).join("")}
 
 </tbody>
 
@@ -3063,15 +3062,15 @@ document
 
 <tbody>
 
-${data.map(x=>`
+\${data.map(x=>\`
 
 <tr>
-<td>${escapeHtml(x.name)}</td>
-<td>${escapeHtml(x.phone)}</td>
-<td>${escapeHtml(x.email)}</td>
+<td>\${escapeHtml(x.name)}</td>
+<td>\${escapeHtml(x.phone)}</td>
+<td>\${escapeHtml(x.email)}</td>
 </tr>
 
-`).join("")}
+\`).join("")}
 
 </tbody>
 
@@ -3104,22 +3103,22 @@ document
 
 <tbody>
 
-${data.map(x=>`
+\${data.map(x=>\`
 
 <tr>
 
 <td>
-${escapeHtml(x.first_name)}
-${escapeHtml(x.last_name)}
+\${escapeHtml(x.first_name)}
+\${escapeHtml(x.last_name)}
 </td>
 
-<td>${escapeHtml(x.phone)}</td>
+<td>\${escapeHtml(x.phone)}</td>
 
-<td>${escapeHtml(x.email)}</td>
+<td>\${escapeHtml(x.email)}</td>
 
 </tr>
 
-`).join("")}
+\`).join("")}
 
 </tbody>
 
@@ -3154,29 +3153,29 @@ document
 
 <tbody>
 
-${data.map(x=>`
+\${data.map(x=>\`
 
 <tr>
 
-<td>${escapeHtml(x.reference)}</td>
+<td>\${escapeHtml(x.reference)}</td>
 
 <td>
-${escapeHtml(x.first_name)}
-${escapeHtml(x.last_name)}
+\${escapeHtml(x.first_name)}
+\${escapeHtml(x.last_name)}
 </td>
 
-<td>${escapeHtml(x.start_date)}</td>
+<td>\${escapeHtml(x.start_date)}</td>
 
 <td>
-${Number(x.monthly_rent||0)
+\${Number(x.monthly_rent||0)
 .toLocaleString("fr-FR")} FCFA
 </td>
 
-<td>${escapeHtml(x.status)}</td>
+<td>\${escapeHtml(x.status)}</td>
 
 </tr>
 
-`).join("")}
+\`).join("")}
 
 </tbody>
 
@@ -3212,37 +3211,37 @@ document
 
 <tbody>
 
-${data.map(x=>`
+\${data.map(x=>\`
 
 <tr>
 
 <td>
-${escapeHtml(x.first_name)}
-${escapeHtml(x.last_name)}
+\${escapeHtml(x.first_name)}
+\${escapeHtml(x.last_name)}
 </td>
 
-<td>${escapeHtml(x.reference)}</td>
+<td>\${escapeHtml(x.reference)}</td>
 
 <td>
-${Number(x.amount||0)
+\${Number(x.amount||0)
 .toLocaleString("fr-FR")} FCFA
 </td>
 
-<td>${escapeHtml(x.due_date)}</td>
+<td>\${escapeHtml(x.due_date)}</td>
 
-<td>${escapeHtml(x.status)}</td>
+<td>\${escapeHtml(x.status)}</td>
 
 <td>
 
-${
+\${
 x.status!=="paid"
 ?
-`<button
+\`<button
 class="primary"
-onclick="markPaid(${x.id})"
+onclick="markPaid(\${x.id})"
 >
 Payé
-</button>`
+</button>\`
 :""
 }
 
@@ -3250,7 +3249,7 @@ Payé
 
 </tr>
 
-`).join("")}
+\`).join("")}
 
 </tbody>
 
@@ -3273,20 +3272,20 @@ data.map(x=>`
 
 <div
 class="notification
-${x.is_read?"":"unread"}"
-onclick="readNotification(${x.id})"
+\${x.is_read?"":"unread"}"
+onclick="readNotification(\${x.id})"
 >
 
 <strong>
-${escapeHtml(x.title)}
+\${escapeHtml(x.title)}
 </strong>
 
 <p>
-${escapeHtml(x.message)}
+\${escapeHtml(x.message)}
 </p>
 
 <small>
-${escapeHtml(x.created_at)}
+\${escapeHtml(x.created_at)}
 </small>
 
 </div>
@@ -3311,11 +3310,11 @@ data.map(x=>`
 <div class="notification">
 
 <strong>
-${escapeHtml(x.title)}
+\${escapeHtml(x.title)}
 </strong>
 
 <p>
-${escapeHtml(x.message)}
+\${escapeHtml(x.message)}
 </p>
 
 </div>
@@ -3384,11 +3383,11 @@ document
 .innerHTML=
 '<option value="">Aucun</option>'+
 data.map(x=>
-`
-<option value="${x.id}">
-${escapeHtml(x.name)}
+\`
+<option value="\${x.id}">
+\${escapeHtml(x.name)}
 </option>
-`
+\`
 ).join("");
 
 }
@@ -3408,13 +3407,13 @@ document
 properties
 .filter(x=>x.status!=="occupied")
 .map(x=>
-`
-<option value="${x.id}">
-${escapeHtml(x.reference)}
+\`
+<option value="\${x.id}">
+\${escapeHtml(x.reference)}
 -
-${escapeHtml(x.title)}
+\${escapeHtml(x.title)}
 </option>
-`
+\`
 )
 .join("");
 
@@ -3423,12 +3422,12 @@ document
 .innerHTML=
 tenants
 .map(x=>
-`
-<option value="${x.id}">
-${escapeHtml(x.first_name)}
-${escapeHtml(x.last_name)}
+\`
+<option value="\${x.id}">
+\${escapeHtml(x.first_name)}
+\${escapeHtml(x.last_name)}
 </option>
-`
+\`
 )
 .join("");
 
@@ -3446,14 +3445,14 @@ document
 leases
 .filter(x=>x.status==="active")
 .map(x=>
-`
-<option value="${x.id}">
-${escapeHtml(x.reference)}
+\`
+<option value="\${x.id}">
+\${escapeHtml(x.reference)}
 -
-${escapeHtml(x.first_name)}
-${escapeHtml(x.last_name)}
+\${escapeHtml(x.first_name)}
+\${escapeHtml(x.last_name)}
 </option>
-`
+\`
 )
 .join("");
 
@@ -3722,3 +3721,4 @@ checkSession();
 </html>
 
 `;
+
