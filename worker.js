@@ -1,4 +1,3 @@
-```javascript
 export default {
   async fetch(request, env) {
     try {
@@ -1343,7 +1342,6 @@ const APP_HTML = `<!doctype html>
 
 <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
-<script src="https://unpkg.com/lucide-react@0.468.0/dist/umd/lucide-react.js"></script>
 <script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
 
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1389,66 +1387,170 @@ button:disabled{
 
 const { useState, useEffect, useMemo } = React;
 
-const lucide =
-  window.lucideReact ||
-  window.LucideReact ||
-  {};
-
-
 /* =========================================================
-   FALLBACK ICON
+   ICONS (SVG intégrés — plus de dépendance à un CDN externe,
+   donc plus jamais de simple point "." à la place d'une icône)
 ========================================================= */
 
-const fallbackIcon = ({
-  size = 18,
-  ...props
-}) =>
-  React.createElement(
-    "svg",
-    {
-      width:size,
-      height:size,
-      viewBox:"0 0 24 24",
-      fill:"none",
-      stroke:"currentColor",
-      strokeWidth:"2",
-      strokeLinecap:"round",
-      strokeLinejoin:"round",
-      ...props
-    },
-    React.createElement("circle", {
-      cx:"12",
-      cy:"12",
-      r:"8"
-    }),
-    React.createElement("path", {
-      d:"M12 8v8"
-    }),
-    React.createElement("path", {
-      d:"M8 12h8"
-    })
-  );
+function makeIcon(paths, viewBox = "0 0 24 24") {
+  return function Icon({ size = 18, color = "currentColor", style, ...props }) {
+    return (
+      <svg
+        width={size}
+        height={size}
+        viewBox={viewBox}
+        fill="none"
+        stroke={color}
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{ flexShrink:0, display:"inline-block", ...style }}
+        {...props}
+      >
+        {paths}
+      </svg>
+    );
+  };
+}
 
+const Plus = makeIcon(
+  <>
+    <path d="M5 12h14"/>
+    <path d="M12 5v14"/>
+  </>
+);
 
-const Plus = lucide.Plus || fallbackIcon;
-const X = lucide.X || fallbackIcon;
-const Phone = lucide.Phone || fallbackIcon;
-const MapPin = lucide.MapPin || fallbackIcon;
-const AlertCircle = lucide.AlertCircle || fallbackIcon;
-const CheckCircle2 = lucide.CheckCircle2 || fallbackIcon;
-const TrendingUp = lucide.TrendingUp || fallbackIcon;
-const Home = lucide.Home || fallbackIcon;
-const Users = lucide.Users || fallbackIcon;
-const LogOut = lucide.LogOut || fallbackIcon;
-const ArrowRight = lucide.ArrowRight || fallbackIcon;
-const Check = lucide.Check || fallbackIcon;
-const Menu = lucide.Menu || fallbackIcon;
-const Building2 = lucide.Building2 || fallbackIcon;
-const UserRound = lucide.UserRound || fallbackIcon;
-const FileText = lucide.FileText || fallbackIcon;
-const Wallet = lucide.Wallet || fallbackIcon;
-const Bell = lucide.Bell || fallbackIcon;
-const MessageCircle = lucide.MessageCircle || fallbackIcon;
+const X = makeIcon(
+  <>
+    <path d="M18 6 6 18"/>
+    <path d="m6 6 12 12"/>
+  </>
+);
+
+const Phone = makeIcon(
+  <path d="M13.832 16.568a1 1 0 0 0 1.213-.303l.355-.465A2 2 0 0 1 17 15h3a2 2 0 0 1 2 2v3a2 2 0 0 1-2 2A18 18 0 0 1 2 4a2 2 0 0 1 2-2h3a2 2 0 0 1 2 2v3a2 2 0 0 1-.8 1.6l-.468.351a1 1 0 0 0-.292 1.233 14 14 0 0 0 6.392 6.384"/>
+);
+
+const MapPin = makeIcon(
+  <>
+    <path d="M20 10c0 4.993-5.539 10.193-7.399 11.799a1 1 0 0 1-1.202 0C9.539 20.193 4 14.993 4 10a8 8 0 0 1 16 0"/>
+    <circle cx="12" cy="10" r="3"/>
+  </>
+);
+
+const AlertCircle = makeIcon(
+  <>
+    <circle cx="12" cy="12" r="10"/>
+    <line x1="12" x2="12" y1="8" y2="12"/>
+    <line x1="12" x2="12.01" y1="16" y2="16"/>
+  </>
+);
+
+const CheckCircle2 = makeIcon(
+  <>
+    <circle cx="12" cy="12" r="10"/>
+    <path d="m9 12 2 2 4-4"/>
+  </>
+);
+
+const TrendingUp = makeIcon(
+  <>
+    <polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/>
+    <polyline points="16 7 22 7 22 13"/>
+  </>
+);
+
+const Home = makeIcon(
+  <>
+    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+    <polyline points="9 22 9 12 15 12 15 22"/>
+  </>
+);
+
+const Users = makeIcon(
+  <>
+    <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+    <circle cx="9" cy="7" r="4"/>
+    <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+  </>
+);
+
+const LogOut = makeIcon(
+  <>
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+    <polyline points="16 17 21 12 16 7"/>
+    <line x1="21" x2="9" y1="12" y2="12"/>
+  </>
+);
+
+const ArrowRight = makeIcon(
+  <>
+    <line x1="5" x2="19" y1="12" y2="12"/>
+    <polyline points="12 5 19 12 12 19"/>
+  </>
+);
+
+const Check = makeIcon(
+  <polyline points="20 6 9 17 4 12"/>
+);
+
+const Menu = makeIcon(
+  <>
+    <line x1="4" x2="20" y1="12" y2="12"/>
+    <line x1="4" x2="20" y1="6" y2="6"/>
+    <line x1="4" x2="20" y1="18" y2="18"/>
+  </>
+);
+
+const Building2 = makeIcon(
+  <>
+    <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18"/>
+    <path d="M2 22h20"/>
+    <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+    <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+    <path d="M10 6h4"/>
+    <path d="M10 10h4"/>
+    <path d="M10 14h4"/>
+    <path d="M10 18h4"/>
+  </>
+);
+
+const UserRound = makeIcon(
+  <>
+    <circle cx="12" cy="8" r="5"/>
+    <path d="M20 21a8 8 0 0 0-16 0"/>
+  </>
+);
+
+const FileText = makeIcon(
+  <>
+    <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/>
+    <polyline points="14 2 14 8 20 8"/>
+    <line x1="16" x2="8" y1="13" y2="13"/>
+    <line x1="16" x2="8" y1="17" y2="17"/>
+    <line x1="10" x2="8" y1="9" y2="9"/>
+  </>
+);
+
+const Wallet = makeIcon(
+  <>
+    <path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/>
+    <path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/>
+    <path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>
+  </>
+);
+
+const Bell = makeIcon(
+  <>
+    <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/>
+    <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>
+  </>
+);
+
+const MessageCircle = makeIcon(
+  <path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/>
+);
 
 const NAVY = "#14213D";
 const GOLD = "#C9A227";
@@ -2866,7 +2968,7 @@ function DashboardHome({
                   </td>
 
                   <td className="py-3 px-4">
-                    {p.reference || "Référence non renseignée"}
+                    {p.reference}
                   </td>
 
                   <td
@@ -2879,7 +2981,7 @@ function DashboardHome({
                   </td>
 
                   <td className="py-3 px-4">
-                    {p.due_date || "Date non renseignée"}
+                    {p.due_date}
                   </td>
 
                   <td className="py-3 px-4">
@@ -3050,7 +3152,7 @@ function StatusBadge({status}) {
   const c =
     config[status] ||
     {
-      label:status || "Statut non renseigné",
+      label:status,
       bg:"#f5f5f4",
       color:"#57534e"
     };
@@ -3133,19 +3235,19 @@ function PropertiesPage({
               >
 
                 <td className="py-3 px-3">
-                  {p.reference || "Référence non renseignée"}
+                  {p.reference}
                 </td>
 
                 <td className="py-3 px-3 font-medium">
-                  {p.title || "Bien non renseigné"}
+                  {p.title}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.city || "Ville non renseignée"}
+                  {p.city || "—"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.type || "Type non renseigné"}
+                  {p.type}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3230,19 +3332,19 @@ function OwnersPage({
               >
 
                 <td className="py-3 px-3 font-medium">
-                  {o.name || "Nom non renseigné"}
+                  {o.name}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.phone || "Téléphone non renseigné"}
+                  {o.phone || "—"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.email || "Email non renseigné"}
+                  {o.email || "—"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.address || "Adresse non renseignée"}
+                  {o.address || "—"}
                 </td>
 
               </tr>
@@ -3319,19 +3421,19 @@ function TenantsPage({
               >
 
                 <td className="py-3 px-3 font-medium">
-                  {t.first_name || "Prénom non renseigné"} {t.last_name || "Nom non renseigné"}
+                  {t.first_name} {t.last_name}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.phone || "Téléphone non renseigné"}
+                  {t.phone || "—"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.email || "Email non renseigné"}
+                  {t.email || "—"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.address || "Adresse non renseignée"}
+                  {t.address || "—"}
                 </td>
 
               </tr>
@@ -3416,19 +3518,19 @@ function LeasesPage({
               >
 
                 <td className="py-3 px-3">
-                  {l.reference || "Référence non renseignée"} — {l.property_title || "Bien non renseigné"}
+                  {l.reference} — {l.property_title}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.first_name || "Prénom non renseigné"} {l.last_name || "Nom non renseigné"}
+                  {l.first_name} {l.last_name}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.start_date || "Date non renseignée"}
+                  {l.start_date}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.end_date || "Date non renseignée"}
+                  {l.end_date || "—"}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3522,11 +3624,11 @@ function PaymentsPage({
               >
 
                 <td className="py-3 px-3">
-                  {p.first_name || "Prénom non renseigné"} {p.last_name || "Nom non renseigné"}
+                  {p.first_name} {p.last_name}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.reference || "Référence non renseignée"}
+                  {p.reference}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3534,7 +3636,7 @@ function PaymentsPage({
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.due_date || "Date non renseignée"}
+                  {p.due_date}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3556,10 +3658,11 @@ function PaymentsPage({
                   ) : (
 
                     <span
-                      className="text-xs"
+                      className="text-xs flex items-center gap-1"
                       style={{color:GREEN}}
                     >
-                      ✓ Enregistré
+                      <CheckCircle2 size={14}/>
+                      Enregistré
                     </span>
 
                   )}
@@ -3626,11 +3729,11 @@ function NotificationsPage({
                 <strong
                   style={{color:NAVY}}
                 >
-                  {n.title || "Notification sans titre"}
+                  {n.title}
                 </strong>
 
                 <p className="text-sm text-stone-500 mt-1">
-                  {n.message || "Message non renseigné"}
+                  {n.message}
                 </p>
 
               </div>
@@ -3650,7 +3753,7 @@ function NotificationsPage({
             </div>
 
             <small className="text-xs text-stone-400">
-              {n.created_at || "Date non renseignée"}
+              {n.created_at}
             </small>
 
           </button>
@@ -3688,15 +3791,15 @@ function MessagesPage({
         >
 
           <strong style={{color:NAVY}}>
-            {m.title || "Message sans titre"}
+            {m.title}
           </strong>
 
           <p className="text-sm text-stone-500 mt-1">
-            {m.message || "Message non renseigné"}
+            {m.message}
           </p>
 
           <small className="text-xs text-stone-400">
-            {m.created_at || "Date non renseignée"}
+            {m.created_at}
           </small>
 
         </div>
@@ -3743,13 +3846,14 @@ function Section({
 
           <button
             onClick={onAction}
-            className="px-3 py-1.5 rounded text-sm font-medium"
+            className="px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5"
             style={{
               backgroundColor:NAVY,
               color:"white"
             }}
           >
-            + {action}
+            <Plus size={14}/>
+            {action}
           </button>
 
         )}
@@ -4447,4 +4551,3 @@ if (root) {
 
 </body>
 </html>`;
-```
