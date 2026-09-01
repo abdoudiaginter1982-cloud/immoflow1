@@ -1,16 +1,8 @@
-
-
 export default {
   async fetch(request, env) {
     try {
       if (!env.DB) {
-        return json(
-          {
-            error:
-              "La base de données D1 n'est pas configurée. Vérifiez le binding DB dans Cloudflare."
-          },
-          500
-        );
+        return json({ error: "La base D1 DB n'est pas configurée." }, 500);
       }
 
       await initDatabase(env.DB);
@@ -22,22 +14,17 @@ export default {
       }
 
       return new Response(APP_HTML, {
-        status: 200,
         headers: {
-          "content-type": "text/html; charset=UTF-8",
-          "cache-control": "no-store"
+          "content-type": "text/html;charset=UTF-8"
         }
       });
     } catch (error) {
       console.error(error);
 
-      return json(
-        {
-          error: "Erreur serveur",
-          details: error instanceof Error ? error.message : String(error)
-        },
-        500
-      );
+      return json({
+        error: "Erreur serveur",
+        details: error?.message || "Erreur inconnue"
+      }, 500);
     }
   }
 };
@@ -75,9 +62,9 @@ async function initDatabase(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      address TEXT,
+      phone TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      address TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -89,9 +76,9 @@ async function initDatabase(db) {
       owner_id INTEGER,
       reference TEXT NOT NULL,
       title TEXT NOT NULL,
-      address TEXT,
-      city TEXT,
-      type TEXT,
+      address TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      type TEXT DEFAULT 'Appartement',
       bedrooms INTEGER DEFAULT 0,
       rent INTEGER DEFAULT 0,
       status TEXT DEFAULT 'available',
@@ -105,9 +92,9 @@ async function initDatabase(db) {
       user_id INTEGER NOT NULL,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      address TEXT,
+      phone TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      address TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -136,7 +123,7 @@ async function initDatabase(db) {
       due_date TEXT NOT NULL,
       paid_date TEXT,
       status TEXT DEFAULT 'pending',
-      payment_method TEXT,
+      payment_method TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -164,31 +151,6 @@ async function initDatabase(db) {
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
-
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_sessions_token
-    ON sessions(token)
-  `).run();
-
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_properties_user
-    ON properties(user_id)
-  `).run();
-
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_tenants_user
-    ON tenants(user_id)
-  `).run();
-
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_payments_user
-    ON payments(user_id)
-  `).run();
-
-  await db.prepare(`
-    CREATE INDEX IF NOT EXISTS idx_notifications_user
-    ON notifications(user_id)
-  `).run();
 }
 
 
@@ -200,26 +162,88 @@ function json(data, status = 200, headers = {}) {
   return new Response(JSON.stringify(data), {
     status,
     headers: {
-      "content-type": "application/json; charset=UTF-8",
+      "content-type": "application/json;charset=UTF-8",
       ...headers
     }
   });
 }
 
 
-function cleanString(value) {
+function safeText(value) {
   return String(value ?? "").trim();
 }
 
 
-function toPositiveInteger(value, fallback = 0) {
-  const number = Number(value);
+async function readJson(request) {
+  try {
+    return await request.json();
+  } catch {
+    throw new Error("JSON invalide.");
+  }
+}
 
-  if (!Number.isFinite(number) || number < 0) {
-    return fallback;
+
+async function hashPassword(password) {
+  const data = new TextEncoder().encode(password);
+
+  const hash = await crypto.subtle.digest(
+    "SHA-256",
+    data
+  );
+
+  return [...new Uint8Array(hash)]
+    .map(x => x.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+
+function randomToken() {
+  return crypto.randomUUID() + crypto.randomUUID();
+}
+
+
+function getCookie(request, name) {
+  const cookies = request.headers.get("Cookie") || "";
+
+  for (const part of cookies.split(";")) {
+    const [key, ...rest] = part.trim().split("=");
+
+    if (key === name) {
+      return rest.join("=");
+    }
   }
 
-  return Math.floor(number);
+  return null;
+}
+
+
+async function getUser(request, db) {
+
+  const token = getCookie(
+    request,
+    "immoflow_session"
+  );
+
+  if (!token) {
+    return null;
+  }
+
+  const session = await db.prepare(`
+    SELECT
+      users.id,
+      users.agency_name,
+      users.name,
+      users.email
+    FROM sessions
+    JOIN users
+      ON users.id = sessions.user_id
+    WHERE sessions.token = ?
+      AND datetime(sessions.expires_at) > datetime('now')
+  `)
+    .bind(token)
+    .first();
+
+  return session || null;
 }
 
 
@@ -228,129 +252,13 @@ function today() {
 }
 
 
-function randomToken() {
-  return crypto.randomUUID() + "-" + crypto.randomUUID();
+function cookie(token, maxAge) {
+  return `immoflow_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${maxAge}`;
 }
 
 
-/* =========================================================
-   PASSWORD HASH
-========================================================= */
-
-async function hashPassword(password) {
-
-  const data = new TextEncoder().encode(password);
-
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    data
-  );
-
-  return Array.from(new Uint8Array(hash))
-    .map(function (x) {
-      return x.toString(16).padStart(2, "0");
-    })
-    .join("");
-}
-
-
-/* =========================================================
-   COOKIE
-========================================================= */
-
-function getCookie(request, name) {
-
-  const cookies =
-    request.headers.get("Cookie") || "";
-
-  const parts = cookies.split(";");
-
-  for (const part of parts) {
-
-    const index = part.indexOf("=");
-
-    if (index === -1) {
-      continue;
-    }
-
-    const key =
-      part.slice(0, index).trim();
-
-    const value =
-      part.slice(index + 1).trim();
-
-    if (key === name) {
-      return value;
-    }
-  }
-
-  return null;
-}
-
-
-function sessionCookie(token) {
-
-  return (
-    "immoflow_session=" +
-    token +
-    "; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800"
-  );
-}
-
-
-function deleteSessionCookie() {
-
-  return (
-    "immoflow_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
-  );
-}
-
-
-/* =========================================================
-   USER
-========================================================= */
-
-async function getUser(request, db) {
-
-  const token =
-    getCookie(request, "immoflow_session");
-
-  if (!token) {
-    return null;
-  }
-
-  const session =
-    await db.prepare(`
-      SELECT
-        users.id,
-        users.agency_name,
-        users.name,
-        users.email
-      FROM sessions
-      INNER JOIN users
-        ON users.id = sessions.user_id
-      WHERE sessions.token = ?
-        AND datetime(sessions.expires_at) > datetime('now')
-      LIMIT 1
-    `)
-    .bind(token)
-    .first();
-
-  return session || null;
-}
-
-
-/* =========================================================
-   SAFE REQUEST JSON
-========================================================= */
-
-async function readJson(request) {
-
-  try {
-    return await request.json();
-  } catch {
-    return null;
-  }
+function clearCookie() {
+  return "immoflow_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0";
 }
 
 
@@ -361,95 +269,60 @@ async function readJson(request) {
 async function api(request, env, url) {
 
   const db = env.DB;
-
   const path = url.pathname;
-  const method = request.method.toUpperCase();
+  const method = request.method;
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      REGISTER
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/register" &&
-    method === "POST"
-  ) {
+  if (path === "/api/register" && method === "POST") {
 
     const data = await readJson(request);
 
-    if (!data) {
-      return json(
-        { error: "Données invalides." },
-        400
-      );
-    }
-
-    const agency =
-      cleanString(data.agency_name);
-
-    const name =
-      cleanString(data.name);
-
-    const email =
-      cleanString(data.email).toLowerCase();
-
-    const password =
-      String(data.password || "");
+    const agency = safeText(data.agency_name);
+    const name = safeText(data.name);
+    const email = safeText(data.email).toLowerCase();
+    const password = String(data.password || "");
 
     if (!agency || !name || !email || !password) {
-      return json(
-        {
-          error:
-            "Tous les champs sont obligatoires."
-        },
-        400
-      );
+      return json({
+        error: "Tous les champs sont obligatoires."
+      }, 400);
     }
 
     if (password.length < 6) {
-      return json(
-        {
-          error:
-            "Le mot de passe doit contenir au moins 6 caractères."
-        },
-        400
-      );
+      return json({
+        error: "Le mot de passe doit contenir au moins 6 caractères."
+      }, 400);
     }
 
-    const existing =
-      await db.prepare(`
-        SELECT id
-        FROM users
-        WHERE email = ?
-        LIMIT 1
-      `)
+    const existing = await db.prepare(`
+      SELECT id
+      FROM users
+      WHERE email = ?
+    `)
       .bind(email)
       .first();
 
     if (existing) {
-      return json(
-        {
-          error:
-            "Un compte existe déjà avec cet email."
-        },
-        409
-      );
+      return json({
+        error: "Un compte existe déjà avec cet email."
+      }, 409);
     }
 
-    const passwordHash =
-      await hashPassword(password);
+    const passwordHash = await hashPassword(password);
 
-    const result =
-      await db.prepare(`
-        INSERT INTO users
-        (
-          agency_name,
-          name,
-          email,
-          password_hash
-        )
-        VALUES (?, ?, ?, ?)
-      `)
+    const result = await db.prepare(`
+      INSERT INTO users (
+        agency_name,
+        name,
+        email,
+        password_hash
+      )
+      VALUES (?, ?, ?, ?)
+    `)
       .bind(
         agency,
         name,
@@ -458,183 +331,132 @@ async function api(request, env, url) {
       )
       .run();
 
-    const userId =
-      result.meta.last_row_id;
+    const userId = result.meta.last_row_id;
 
-    const token =
-      randomToken();
+    const token = randomToken();
 
-    const expires =
-      new Date(
-        Date.now() +
-        7 * 24 * 60 * 60 * 1000
-      ).toISOString();
+    const expires = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     await db.prepare(`
-      INSERT INTO sessions
-      (
+      INSERT INTO sessions (
         user_id,
         token,
         expires_at
       )
       VALUES (?, ?, ?)
     `)
-    .bind(
-      userId,
-      token,
-      expires
-    )
-    .run();
+      .bind(
+        userId,
+        token,
+        expires
+      )
+      .run();
 
     await createNotification(
       db,
       userId,
-      "Bienvenue sur ImmoFlow",
+      "Bienvenue sur Immoflow",
       "Votre compte agence a été créé avec succès.",
       "system"
     );
 
-    return json(
-      {
-        success: true,
-        user: {
-          id: userId,
-          agency_name: agency,
-          name: name,
-          email: email
-        }
-      },
-      201,
-      {
-        "Set-Cookie":
-          sessionCookie(token)
+    return json({
+      success: true,
+      user: {
+        id: userId,
+        agency_name: agency,
+        name,
+        email
       }
-    );
+    }, 201, {
+      "Set-Cookie": cookie(token, 604800)
+    });
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      LOGIN
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/login" &&
-    method === "POST"
-  ) {
+  if (path === "/api/login" && method === "POST") {
 
     const data = await readJson(request);
 
-    if (!data) {
-      return json(
-        { error: "Données invalides." },
-        400
-      );
-    }
-
-    const email =
-      cleanString(data.email).toLowerCase();
-
-    const password =
-      String(data.password || "");
+    const email = safeText(data.email).toLowerCase();
+    const password = String(data.password || "");
 
     if (!email || !password) {
-      return json(
-        {
-          error:
-            "Email et mot de passe obligatoires."
-        },
-        400
-      );
+      return json({
+        error: "Email et mot de passe obligatoires."
+      }, 400);
     }
 
-    const user =
-      await db.prepare(`
-        SELECT *
-        FROM users
-        WHERE email = ?
-        LIMIT 1
-      `)
+    const user = await db.prepare(`
+      SELECT *
+      FROM users
+      WHERE email = ?
+    `)
       .bind(email)
       .first();
 
     if (!user) {
-      return json(
-        {
-          error:
-            "Email ou mot de passe incorrect."
-        },
-        401
-      );
+      return json({
+        error: "Email ou mot de passe incorrect."
+      }, 401);
     }
 
-    const passwordHash =
-      await hashPassword(password);
+    const passwordHash = await hashPassword(password);
 
-    if (
-      passwordHash !==
-      user.password_hash
-    ) {
-      return json(
-        {
-          error:
-            "Email ou mot de passe incorrect."
-        },
-        401
-      );
+    if (passwordHash !== user.password_hash) {
+      return json({
+        error: "Email ou mot de passe incorrect."
+      }, 401);
     }
 
-    const token =
-      randomToken();
+    const token = randomToken();
 
-    const expires =
-      new Date(
-        Date.now() +
-        7 * 24 * 60 * 60 * 1000
-      ).toISOString();
+    const expires = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000
+    ).toISOString();
 
     await db.prepare(`
-      INSERT INTO sessions
-      (
+      INSERT INTO sessions (
         user_id,
         token,
         expires_at
       )
       VALUES (?, ?, ?)
     `)
-    .bind(
-      user.id,
-      token,
-      expires
-    )
-    .run();
+      .bind(
+        user.id,
+        token,
+        expires
+      )
+      .run();
 
-    return json(
-      {
-        success: true,
-        user: {
-          id: user.id,
-          agency_name: user.agency_name,
-          name: user.name,
-          email: user.email
-        }
-      },
-      200,
-      {
-        "Set-Cookie":
-          sessionCookie(token)
+    return json({
+      success: true,
+      user: {
+        id: user.id,
+        agency_name: user.agency_name,
+        name: user.name,
+        email: user.email
       }
-    );
+    }, 200, {
+      "Set-Cookie": cookie(token, 604800)
+    });
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      ME
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (path === "/api/me") {
+  if (path === "/api/me" && method === "GET") {
 
-    const user =
-      await getUser(request, db);
+    const user = await getUser(request, db);
 
     return json({
       user: user || null
@@ -642,133 +464,95 @@ async function api(request, env, url) {
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      LOGOUT
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/logout" &&
-    method === "POST"
-  ) {
+  if (path === "/api/logout" && method === "POST") {
 
-    const token =
-      getCookie(
-        request,
-        "immoflow_session"
-      );
+    const token = getCookie(
+      request,
+      "immoflow_session"
+    );
 
     if (token) {
-
       await db.prepare(`
         DELETE FROM sessions
         WHERE token = ?
       `)
-      .bind(token)
-      .run();
+        .bind(token)
+        .run();
     }
 
-    return json(
-      {
-        success: true
-      },
-      200,
-      {
-        "Set-Cookie":
-          deleteSessionCookie()
-      }
-    );
+    return json({
+      success: true
+    }, 200, {
+      "Set-Cookie": clearCookie()
+    });
   }
 
 
-  /* =======================================================
-     AUTH REQUIRED
-  ======================================================= */
+  /* -------------------------------------------------------
+     AUTHENTIFICATION
+  ------------------------------------------------------- */
 
-  const user =
-    await getUser(request, db);
+  const user = await getUser(request, db);
 
   if (!user) {
-    return json(
-      {
-        error:
-          "Vous devez être connecté."
-      },
-      401
-    );
+    return json({
+      error: "Vous devez être connecté."
+    }, 401);
   }
 
   const uid = user.id;
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      DASHBOARD
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/dashboard" &&
-    method === "GET"
-  ) {
+  if (path === "/api/dashboard" && method === "GET") {
 
-    await updateLatePayments(
-      db,
-      uid
-    );
-
-    const properties =
-      await db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM properties
-        WHERE user_id = ?
-      `)
+    const properties = await db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM properties
+      WHERE user_id = ?
+    `)
       .bind(uid)
       .first();
 
-    const tenants =
-      await db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM tenants
-        WHERE user_id = ?
-      `)
+    const tenants = await db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM tenants
+      WHERE user_id = ?
+    `)
       .bind(uid)
       .first();
 
-    const occupied =
-      await db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM properties
-        WHERE user_id = ?
-          AND status = 'occupied'
-      `)
+    const occupied = await db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM properties
+      WHERE user_id = ?
+      AND status = 'occupied'
+    `)
       .bind(uid)
       .first();
 
-    const late =
-      await db.prepare(`
-        SELECT COALESCE(SUM(amount), 0) AS total
-        FROM payments
-        WHERE user_id = ?
-          AND status = 'late'
-      `)
+    const late = await db.prepare(`
+      SELECT COALESCE(SUM(amount), 0) AS total
+      FROM payments
+      WHERE user_id = ?
+      AND status = 'late'
+    `)
       .bind(uid)
       .first();
 
-    const unread =
-      await db.prepare(`
-        SELECT COUNT(*) AS count
-        FROM notifications
-        WHERE user_id = ?
-          AND is_read = 0
-      `)
-      .bind(uid)
-      .first();
-
-    const paid =
-      await db.prepare(`
-        SELECT COALESCE(SUM(amount), 0) AS total
-        FROM payments
-        WHERE user_id = ?
-          AND status = 'paid'
-      `)
+    const unread = await db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM notifications
+      WHERE user_id = ?
+      AND is_read = 0
+    `)
       .bind(uid)
       .first();
 
@@ -777,231 +561,158 @@ async function api(request, env, url) {
       tenants: Number(tenants?.count || 0),
       occupied: Number(occupied?.count || 0),
       late: Number(late?.total || 0),
-      paid: Number(paid?.total || 0),
       unread: Number(unread?.count || 0)
     });
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      OWNERS
-  ======================================================= */
+  ------------------------------------------------------- */
 
   if (path === "/api/owners") {
 
     if (method === "GET") {
 
-      const result =
-        await db.prepare(`
-          SELECT *
-          FROM owners
-          WHERE user_id = ?
-          ORDER BY id DESC
-        `)
+      const result = await db.prepare(`
+        SELECT *
+        FROM owners
+        WHERE user_id = ?
+        ORDER BY id DESC
+      `)
         .bind(uid)
         .all();
 
-      return json(
-        result.results || []
-      );
+      return json(result.results || []);
     }
 
     if (method === "POST") {
 
-      const data =
-        await readJson(request);
+      const data = await readJson(request);
 
-      if (!data) {
-        return json(
-          {
-            error: "Données invalides."
-          },
-          400
-        );
-      }
-
-      const name =
-        cleanString(data.name);
+      const name = safeText(data.name);
 
       if (!name) {
-        return json(
-          {
-            error:
-              "Le nom est obligatoire."
-          },
-          400
-        );
+        return json({
+          error: "Le nom est obligatoire."
+        }, 400);
       }
 
-      const result =
-        await db.prepare(`
-          INSERT INTO owners
-          (
-            user_id,
-            name,
-            phone,
-            email,
-            address
-          )
-          VALUES (?, ?, ?, ?, ?)
-        `)
+      const result = await db.prepare(`
+        INSERT INTO owners (
+          user_id,
+          name,
+          phone,
+          email,
+          address
+        )
+        VALUES (?, ?, ?, ?, ?)
+      `)
         .bind(
           uid,
           name,
-          cleanString(data.phone),
-          cleanString(data.email),
-          cleanString(data.address)
+          safeText(data.phone),
+          safeText(data.email),
+          safeText(data.address)
         )
         .run();
 
-      return json(
-        {
-          success: true,
-          id: result.meta.last_row_id
-        },
-        201
-      );
+      return json({
+        success: true,
+        id: result.meta.last_row_id
+      }, 201);
     }
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      PROPERTIES
-  ======================================================= */
+  ------------------------------------------------------- */
 
   if (path === "/api/properties") {
 
     if (method === "GET") {
 
-      const result =
-        await db.prepare(`
-          SELECT
-            properties.*,
-            owners.name AS owner_name
-          FROM properties
-          LEFT JOIN owners
-            ON owners.id = properties.owner_id
-            AND owners.user_id = properties.user_id
-          WHERE properties.user_id = ?
-          ORDER BY properties.id DESC
-        `)
+      const result = await db.prepare(`
+        SELECT
+          properties.*,
+          owners.name AS owner_name
+        FROM properties
+        LEFT JOIN owners
+          ON owners.id = properties.owner_id
+          AND owners.user_id = properties.user_id
+        WHERE properties.user_id = ?
+        ORDER BY properties.id DESC
+      `)
         .bind(uid)
         .all();
 
-      return json(
-        result.results || []
-      );
+      return json(result.results || []);
     }
 
     if (method === "POST") {
 
-      const data =
-        await readJson(request);
+      const data = await readJson(request);
 
-      if (!data) {
-        return json(
-          {
-            error:
-              "Données invalides."
-          },
-          400
-        );
-      }
-
-      const reference =
-        cleanString(data.reference);
-
-      const title =
-        cleanString(data.title);
+      const reference = safeText(data.reference);
+      const title = safeText(data.title);
 
       if (!reference || !title) {
-        return json(
-          {
-            error:
-              "Référence et nom du bien obligatoires."
-          },
-          400
-        );
+        return json({
+          error: "Référence et nom du bien obligatoires."
+        }, 400);
       }
 
       let ownerId = null;
 
-      if (
-        data.owner_id !== undefined &&
-        data.owner_id !== null &&
-        String(data.owner_id) !== ""
-      ) {
+      if (data.owner_id) {
 
-        ownerId =
-          toPositiveInteger(
-            data.owner_id,
-            0
-          );
-
-        const owner =
-          await db.prepare(`
-            SELECT id
-            FROM owners
-            WHERE id = ?
-              AND user_id = ?
-          `)
+        const owner = await db.prepare(`
+          SELECT id
+          FROM owners
+          WHERE id = ?
+          AND user_id = ?
+        `)
           .bind(
-            ownerId,
+            Number(data.owner_id),
             uid
           )
           .first();
 
         if (!owner) {
-          return json(
-            {
-              error:
-                "Propriétaire invalide."
-            },
-            400
-          );
+          return json({
+            error: "Propriétaire invalide."
+          }, 400);
         }
+
+        ownerId = Number(data.owner_id);
       }
 
-      const bedrooms =
-        toPositiveInteger(
-          data.bedrooms,
-          0
-        );
-
-      const rent =
-        toPositiveInteger(
-          data.rent,
-          0
-        );
-
-      const result =
-        await db.prepare(`
-          INSERT INTO properties
-          (
-            user_id,
-            owner_id,
-            reference,
-            title,
-            address,
-            city,
-            type,
-            bedrooms,
-            rent,
-            status
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
-        `)
+      const result = await db.prepare(`
+        INSERT INTO properties (
+          user_id,
+          owner_id,
+          reference,
+          title,
+          address,
+          city,
+          type,
+          bedrooms,
+          rent,
+          status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+      `)
         .bind(
           uid,
           ownerId,
           reference,
           title,
-          cleanString(data.address),
-          cleanString(data.city),
-          cleanString(data.type) ||
-            "Appartement",
-          bedrooms,
-          rent
+          safeText(data.address),
+          safeText(data.city),
+          safeText(data.type) || "Appartement",
+          Number(data.bedrooms || 0),
+          Number(data.rent || 0)
         )
         .run();
 
@@ -1009,96 +720,69 @@ async function api(request, env, url) {
         db,
         uid,
         "Nouveau bien",
-        title +
-          " a été ajouté à votre portefeuille.",
+        `${title} a été ajouté à votre portefeuille.`,
         "property"
       );
 
-      return json(
-        {
-          success: true,
-          id: result.meta.last_row_id
-        },
-        201
-      );
+      return json({
+        success: true,
+        id: result.meta.last_row_id
+      }, 201);
     }
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      TENANTS
-  ======================================================= */
+  ------------------------------------------------------- */
 
   if (path === "/api/tenants") {
 
     if (method === "GET") {
 
-      const result =
-        await db.prepare(`
-          SELECT *
-          FROM tenants
-          WHERE user_id = ?
-          ORDER BY id DESC
-        `)
+      const result = await db.prepare(`
+        SELECT *
+        FROM tenants
+        WHERE user_id = ?
+        ORDER BY id DESC
+      `)
         .bind(uid)
         .all();
 
-      return json(
-        result.results || []
-      );
+      return json(result.results || []);
     }
 
     if (method === "POST") {
 
-      const data =
-        await readJson(request);
+      const data = await readJson(request);
 
-      if (!data) {
-        return json(
-          {
-            error:
-              "Données invalides."
-          },
-          400
-        );
-      }
-
-      const firstName =
-        cleanString(data.first_name);
-
-      const lastName =
-        cleanString(data.last_name);
+      const firstName = safeText(data.first_name);
+      const lastName = safeText(data.last_name);
 
       if (!firstName || !lastName) {
-        return json(
-          {
-            error:
-              "Prénom et nom obligatoires."
-          },
-          400
-        );
+        return json({
+          error: "Prénom et nom obligatoires."
+        }, 400);
       }
 
-      const result =
-        await db.prepare(`
-          INSERT INTO tenants
-          (
-            user_id,
-            first_name,
-            last_name,
-            phone,
-            email,
-            address
-          )
-          VALUES (?, ?, ?, ?, ?, ?)
-        `)
+      const result = await db.prepare(`
+        INSERT INTO tenants (
+          user_id,
+          first_name,
+          last_name,
+          phone,
+          email,
+          address
+        )
+        VALUES (?, ?, ?, ?, ?, ?)
+      `)
         .bind(
           uid,
           firstName,
           lastName,
-          cleanString(data.phone),
-          cleanString(data.email),
-          cleanString(data.address)
+          safeText(data.phone),
+          safeText(data.email),
+          safeText(data.address)
         )
         .run();
 
@@ -1106,194 +790,127 @@ async function api(request, env, url) {
         db,
         uid,
         "Nouveau locataire",
-        firstName +
-          " " +
-          lastName +
-          " a été ajouté.",
+        `${firstName} ${lastName} a été ajouté.`,
         "tenant"
       );
 
-      return json(
-        {
-          success: true,
-          id: result.meta.last_row_id
-        },
-        201
-      );
+      return json({
+        success: true,
+        id: result.meta.last_row_id
+      }, 201);
     }
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      LEASES
-  ======================================================= */
+  ------------------------------------------------------- */
 
   if (path === "/api/leases") {
 
     if (method === "GET") {
 
-      const result =
-        await db.prepare(`
-          SELECT
-            leases.*,
-            properties.reference,
-            properties.title AS property_title,
-            tenants.first_name,
-            tenants.last_name
-          FROM leases
-          INNER JOIN properties
-            ON properties.id = leases.property_id
-            AND properties.user_id = leases.user_id
-          INNER JOIN tenants
-            ON tenants.id = leases.tenant_id
-            AND tenants.user_id = leases.user_id
-          WHERE leases.user_id = ?
-          ORDER BY leases.id DESC
-        `)
+      const result = await db.prepare(`
+        SELECT
+          leases.*,
+          properties.reference,
+          properties.title AS property_title,
+          tenants.first_name,
+          tenants.last_name
+        FROM leases
+        JOIN properties
+          ON properties.id = leases.property_id
+          AND properties.user_id = leases.user_id
+        JOIN tenants
+          ON tenants.id = leases.tenant_id
+          AND tenants.user_id = leases.user_id
+        WHERE leases.user_id = ?
+        ORDER BY leases.id DESC
+      `)
         .bind(uid)
         .all();
 
-      return json(
-        result.results || []
-      );
+      return json(result.results || []);
     }
 
     if (method === "POST") {
 
-      const data =
-        await readJson(request);
+      const data = await readJson(request);
 
-      if (!data) {
-        return json(
-          {
-            error:
-              "Données invalides."
-          },
-          400
-        );
-      }
-
-      const propertyId =
-        toPositiveInteger(
-          data.property_id,
-          0
-        );
-
-      const tenantId =
-        toPositiveInteger(
-          data.tenant_id,
-          0
-        );
-
-      const startDate =
-        cleanString(data.start_date);
-
-      const monthlyRent =
-        toPositiveInteger(
-          data.monthly_rent,
-          0
-        );
+      const propertyId = Number(data.property_id);
+      const tenantId = Number(data.tenant_id);
+      const startDate = safeText(data.start_date);
+      const monthlyRent = Number(data.monthly_rent);
 
       if (
         !propertyId ||
         !tenantId ||
         !startDate ||
-        !monthlyRent
+        !monthlyRent ||
+        monthlyRent <= 0
       ) {
-        return json(
-          {
-            error:
-              "Informations du bail incomplètes."
-          },
-          400
-        );
+        return json({
+          error: "Informations du bail incomplètes."
+        }, 400);
       }
 
-      const property =
-        await db.prepare(`
-          SELECT id, status
-          FROM properties
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
+      const property = await db.prepare(`
+        SELECT id, status
+        FROM properties
+        WHERE id = ?
+        AND user_id = ?
+      `)
         .bind(
           propertyId,
           uid
         )
         .first();
 
-      if (!property) {
-        return json(
-          {
-            error:
-              "Bien introuvable."
-          },
-          404
-        );
-      }
-
-      if (property.status === "occupied") {
-        return json(
-          {
-            error:
-              "Ce bien est déjà occupé."
-          },
-          409
-        );
-      }
-
-      const tenant =
-        await db.prepare(`
-          SELECT id
-          FROM tenants
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
+      const tenant = await db.prepare(`
+        SELECT id
+        FROM tenants
+        WHERE id = ?
+        AND user_id = ?
+      `)
         .bind(
           tenantId,
           uid
         )
         .first();
 
-      if (!tenant) {
-        return json(
-          {
-            error:
-              "Locataire introuvable."
-          },
-          404
-        );
+      if (!property || !tenant) {
+        return json({
+          error: "Bien ou locataire invalide."
+        }, 400);
       }
 
-      const result =
-        await db.prepare(`
-          INSERT INTO leases
-          (
-            user_id,
-            property_id,
-            tenant_id,
-            start_date,
-            end_date,
-            monthly_rent,
-            deposit,
-            status
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-        `)
+      if (property.status === "occupied") {
+        return json({
+          error: "Ce bien est déjà occupé."
+        }, 409);
+      }
+
+      const result = await db.prepare(`
+        INSERT INTO leases (
+          user_id,
+          property_id,
+          tenant_id,
+          start_date,
+          end_date,
+          monthly_rent,
+          deposit,
+          status
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+      `)
         .bind(
           uid,
           propertyId,
           tenantId,
           startDate,
-          cleanString(data.end_date) ||
-            null,
+          safeText(data.end_date) || null,
           monthlyRent,
-          toPositiveInteger(
-            data.deposit,
-            0
-          )
+          Number(data.deposit || 0)
         )
         .run();
 
@@ -1301,13 +918,13 @@ async function api(request, env, url) {
         UPDATE properties
         SET status = 'occupied'
         WHERE id = ?
-          AND user_id = ?
+        AND user_id = ?
       `)
-      .bind(
-        propertyId,
-        uid
-      )
-      .run();
+        .bind(
+          propertyId,
+          uid
+        )
+        .run();
 
       await createNotification(
         db,
@@ -1317,111 +934,76 @@ async function api(request, env, url) {
         "lease"
       );
 
-      return json(
-        {
-          success: true,
-          id: result.meta.last_row_id
-        },
-        201
-      );
+      return json({
+        success: true,
+        id: result.meta.last_row_id
+      }, 201);
     }
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      PAYMENTS
-  ======================================================= */
+  ------------------------------------------------------- */
 
   if (path === "/api/payments") {
 
     if (method === "GET") {
 
-      await updateLatePayments(
-        db,
-        uid
-      );
+      await updateLatePayments(db, uid);
 
-      const result =
-        await db.prepare(`
-          SELECT
-            payments.*,
-            tenants.first_name,
-            tenants.last_name,
-            properties.reference
-          FROM payments
-          INNER JOIN leases
-            ON leases.id = payments.lease_id
-            AND leases.user_id = payments.user_id
-          INNER JOIN tenants
-            ON tenants.id = leases.tenant_id
-            AND tenants.user_id = payments.user_id
-          INNER JOIN properties
-            ON properties.id = leases.property_id
-            AND properties.user_id = payments.user_id
-          WHERE payments.user_id = ?
-          ORDER BY payments.due_date DESC,
-                   payments.id DESC
-        `)
+      const result = await db.prepare(`
+        SELECT
+          payments.*,
+          tenants.first_name,
+          tenants.last_name,
+          properties.reference,
+          properties.title AS property_title
+        FROM payments
+        JOIN leases
+          ON leases.id = payments.lease_id
+          AND leases.user_id = payments.user_id
+        JOIN tenants
+          ON tenants.id = leases.tenant_id
+          AND tenants.user_id = payments.user_id
+        JOIN properties
+          ON properties.id = leases.property_id
+          AND properties.user_id = payments.user_id
+        WHERE payments.user_id = ?
+        ORDER BY payments.due_date DESC
+      `)
         .bind(uid)
         .all();
 
-      return json(
-        result.results || []
-      );
+      return json(result.results || []);
     }
 
     if (method === "POST") {
 
-      const data =
-        await readJson(request);
+      const data = await readJson(request);
 
-      if (!data) {
-        return json(
-          {
-            error:
-              "Données invalides."
-          },
-          400
-        );
-      }
-
-      const leaseId =
-        toPositiveInteger(
-          data.lease_id,
-          0
-        );
-
-      const amount =
-        toPositiveInteger(
-          data.amount,
-          0
-        );
-
-      const dueDate =
-        cleanString(data.due_date);
+      const leaseId = Number(data.lease_id);
+      const amount = Number(data.amount);
+      const dueDate = safeText(data.due_date);
 
       if (
         !leaseId ||
         !amount ||
+        amount <= 0 ||
         !dueDate
       ) {
-        return json(
-          {
-            error:
-              "Informations du loyer incomplètes."
-          },
-          400
-        );
+        return json({
+          error: "Informations du loyer incomplètes."
+        }, 400);
       }
 
-      const lease =
-        await db.prepare(`
-          SELECT id
-          FROM leases
-          WHERE id = ?
-            AND user_id = ?
-          LIMIT 1
-        `)
+      const lease = await db.prepare(`
+        SELECT id
+        FROM leases
+        WHERE id = ?
+        AND user_id = ?
+        AND status = 'active'
+      `)
         .bind(
           leaseId,
           uid
@@ -1429,75 +1011,57 @@ async function api(request, env, url) {
         .first();
 
       if (!lease) {
-        return json(
-          {
-            error:
-              "Bail introuvable."
-          },
-          404
-        );
+        return json({
+          error: "Bail actif introuvable."
+        }, 404);
       }
 
-      const result =
-        await db.prepare(`
-          INSERT INTO payments
-          (
-            user_id,
-            lease_id,
-            amount,
-            due_date,
-            status,
-            payment_method
-          )
-          VALUES (?, ?, ?, ?, 'pending', ?)
-        `)
+      const result = await db.prepare(`
+        INSERT INTO payments (
+          user_id,
+          lease_id,
+          amount,
+          due_date,
+          status,
+          payment_method
+        )
+        VALUES (?, ?, ?, ?, 'pending', ?)
+      `)
         .bind(
           uid,
           leaseId,
           amount,
           dueDate,
-          cleanString(
-            data.payment_method
-          )
+          safeText(data.payment_method)
         )
         .run();
 
-      return json(
-        {
-          success: true,
-          id: result.meta.last_row_id
-        },
-        201
-      );
+      return json({
+        success: true,
+        id: result.meta.last_row_id
+      }, 201);
     }
   }
 
 
-  /* =======================================================
-     MARK PAYMENT PAID
-  ======================================================= */
+  /* -------------------------------------------------------
+     PAYMENT PAID
+  ------------------------------------------------------- */
 
-  const paidMatch =
-    path.match(
-      /^\/api\/payments\/(\d+)\/paid$/
-    );
+  const paidMatch = path.match(
+    /^\/api\/payments\/(\d+)\/paid$/
+  );
 
-  if (
-    paidMatch &&
-    method === "POST"
-  ) {
+  if (paidMatch && method === "POST") {
 
-    const paymentId =
-      Number(paidMatch[1]);
+    const paymentId = Number(paidMatch[1]);
 
-    const payment =
-      await db.prepare(`
-        SELECT id
-        FROM payments
-        WHERE id = ?
-          AND user_id = ?
-        LIMIT 1
-      `)
+    const payment = await db.prepare(`
+      SELECT id
+      FROM payments
+      WHERE id = ?
+      AND user_id = ?
+    `)
       .bind(
         paymentId,
         uid
@@ -1505,13 +1069,9 @@ async function api(request, env, url) {
       .first();
 
     if (!payment) {
-      return json(
-        {
-          error:
-            "Paiement introuvable."
-        },
-        404
-      );
+      return json({
+        error: "Paiement introuvable."
+      }, 404);
     }
 
     await db.prepare(`
@@ -1520,14 +1080,14 @@ async function api(request, env, url) {
         status = 'paid',
         paid_date = ?
       WHERE id = ?
-        AND user_id = ?
+      AND user_id = ?
     `)
-    .bind(
-      today(),
-      paymentId,
-      uid
-    )
-    .run();
+      .bind(
+        today(),
+        paymentId,
+        uid
+      )
+      .run();
 
     await createNotification(
       db,
@@ -1543,58 +1103,45 @@ async function api(request, env, url) {
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      NOTIFICATIONS
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/notifications" &&
-    method === "GET"
-  ) {
+  if (path === "/api/notifications") {
 
-    await updateLatePayments(
-      db,
-      uid
-    );
+    await updateLatePayments(db, uid);
 
-    const result =
-      await db.prepare(`
-        SELECT *
-        FROM notifications
-        WHERE user_id = ?
-        ORDER BY id DESC
-        LIMIT 100
-      `)
+    const result = await db.prepare(`
+      SELECT *
+      FROM notifications
+      WHERE user_id = ?
+      ORDER BY id DESC
+      LIMIT 100
+    `)
       .bind(uid)
       .all();
 
-    return json(
-      result.results || []
-    );
+    return json(result.results || []);
   }
 
 
-  const notificationMatch =
-    path.match(
-      /^\/api\/notifications\/(\d+)\/read$/
-    );
+  const notificationMatch = path.match(
+    /^\/api\/notifications\/(\d+)\/read$/
+  );
 
-  if (
-    notificationMatch &&
-    method === "POST"
-  ) {
+  if (notificationMatch && method === "POST") {
 
     await db.prepare(`
       UPDATE notifications
       SET is_read = 1
       WHERE id = ?
-        AND user_id = ?
+      AND user_id = ?
     `)
-    .bind(
-      Number(notificationMatch[1]),
-      uid
-    )
-    .run();
+      .bind(
+        Number(notificationMatch[1]),
+        uid
+      )
+      .run();
 
     return json({
       success: true
@@ -1612,8 +1159,8 @@ async function api(request, env, url) {
       SET is_read = 1
       WHERE user_id = ?
     `)
-    .bind(uid)
-    .run();
+      .bind(uid)
+      .run();
 
     return json({
       success: true
@@ -1621,45 +1168,35 @@ async function api(request, env, url) {
   }
 
 
-  /* =======================================================
+  /* -------------------------------------------------------
      MESSAGES
-  ======================================================= */
+  ------------------------------------------------------- */
 
-  if (
-    path === "/api/messages" &&
-    method === "GET"
-  ) {
+  if (path === "/api/messages" && method === "GET") {
 
-    const result =
-      await db.prepare(`
-        SELECT
-          messages.*,
-          tenants.first_name,
-          tenants.last_name
-        FROM messages
-        LEFT JOIN tenants
-          ON tenants.id = messages.tenant_id
-          AND tenants.user_id = messages.user_id
-        WHERE messages.user_id = ?
-        ORDER BY messages.id DESC
-        LIMIT 100
-      `)
+    const result = await db.prepare(`
+      SELECT
+        messages.*,
+        tenants.first_name,
+        tenants.last_name
+      FROM messages
+      LEFT JOIN tenants
+        ON tenants.id = messages.tenant_id
+        AND tenants.user_id = messages.user_id
+      WHERE messages.user_id = ?
+      ORDER BY messages.id DESC
+      LIMIT 100
+    `)
       .bind(uid)
       .all();
 
-    return json(
-      result.results || []
-    );
+    return json(result.results || []);
   }
 
 
-  return json(
-    {
-      error:
-        "Route inconnue."
-    },
-    404
-  );
+  return json({
+    error: "Route inconnue."
+  }, 404);
 }
 
 
@@ -1667,74 +1204,63 @@ async function api(request, env, url) {
    LATE PAYMENTS
 ========================================================= */
 
-async function updateLatePayments(
-  db,
-  userId
-) {
+async function updateLatePayments(db, userId) {
 
   const date = today();
 
-  const late =
-    await db.prepare(`
-      SELECT
-        payments.id,
-        payments.lease_id,
-        tenants.id AS tenant_id,
-        tenants.first_name,
-        tenants.last_name,
-        properties.reference
-      FROM payments
-      INNER JOIN leases
-        ON leases.id = payments.lease_id
-        AND leases.user_id = payments.user_id
-      INNER JOIN tenants
-        ON tenants.id = leases.tenant_id
-        AND tenants.user_id = payments.user_id
-      INNER JOIN properties
-        ON properties.id = leases.property_id
-        AND properties.user_id = payments.user_id
-      WHERE payments.user_id = ?
-        AND payments.status = 'pending'
-        AND payments.due_date < ?
-    `)
+  const late = await db.prepare(`
+    SELECT
+      payments.id,
+      payments.lease_id,
+      tenants.id AS tenant_id,
+      tenants.first_name,
+      tenants.last_name,
+      properties.reference
+    FROM payments
+    JOIN leases
+      ON leases.id = payments.lease_id
+      AND leases.user_id = payments.user_id
+    JOIN tenants
+      ON tenants.id = leases.tenant_id
+      AND tenants.user_id = payments.user_id
+    JOIN properties
+      ON properties.id = leases.property_id
+      AND properties.user_id = payments.user_id
+    WHERE payments.user_id = ?
+      AND payments.status = 'pending'
+      AND payments.due_date < ?
+  `)
     .bind(
       userId,
       date
     )
     .all();
 
-  for (
-    const payment of
-    late.results || []
-  ) {
+  for (const payment of late.results || []) {
 
     await db.prepare(`
       UPDATE payments
       SET status = 'late'
       WHERE id = ?
-        AND user_id = ?
-        AND status = 'pending'
+      AND user_id = ?
+      AND status = 'pending'
     `)
-    .bind(
-      payment.id,
-      userId
-    )
-    .run();
+      .bind(
+        payment.id,
+        userId
+      )
+      .run();
 
-    const existing =
-      await db.prepare(`
-        SELECT id
-        FROM notifications
-        WHERE user_id = ?
-          AND type = 'late'
-          AND message LIKE ?
-        LIMIT 1
-      `)
+    const existing = await db.prepare(`
+      SELECT id
+      FROM notifications
+      WHERE user_id = ?
+      AND type = 'late'
+      AND message LIKE ?
+    `)
       .bind(
         userId,
-        "%Référence paiement " +
-          payment.id +
-          "%"
+        `%paiement ${payment.id}%`
       )
       .first();
 
@@ -1744,21 +1270,12 @@ async function updateLatePayments(
         db,
         userId,
         "Loyer en retard",
-        "Le loyer de " +
-          payment.first_name +
-          " " +
-          payment.last_name +
-          " pour " +
-          payment.reference +
-          " est en retard. Référence paiement " +
-          payment.id +
-          ".",
+        `Le loyer de ${payment.first_name} ${payment.last_name} pour ${payment.reference} est en retard. Référence paiement ${payment.id}.`,
         "late"
       );
 
       await db.prepare(`
-        INSERT INTO messages
-        (
+        INSERT INTO messages (
           user_id,
           tenant_id,
           title,
@@ -1767,17 +1284,13 @@ async function updateLatePayments(
         )
         VALUES (?, ?, ?, ?, 'automatic')
       `)
-      .bind(
-        userId,
-        payment.tenant_id,
-        "Rappel de loyer",
-        "Le paiement " +
-          payment.id +
-          " concernant " +
-          payment.reference +
-          " est en retard."
-      )
-      .run();
+        .bind(
+          userId,
+          payment.tenant_id,
+          "Rappel de loyer",
+          `Le paiement ${payment.id} concernant ${payment.reference} est en retard.`
+        )
+        .run();
     }
   }
 }
@@ -1796,8 +1309,7 @@ async function createNotification(
 ) {
 
   await db.prepare(`
-    INSERT INTO notifications
-    (
+    INSERT INTO notifications (
       user_id,
       title,
       message,
@@ -1805,13 +1317,13 @@ async function createNotification(
     )
     VALUES (?, ?, ?, ?)
   `)
-  .bind(
-    userId,
-    title,
-    message,
-    type
-  )
-  .run();
+    .bind(
+      userId,
+      title,
+      message,
+      type
+    )
+    .run();
 }
 
 
@@ -1819,1660 +1331,149 @@ async function createNotification(
    FRONTEND
 ========================================================= */
 
-const APP_HTML = `<!DOCTYPE html>
+const APP_HTML = `<!doctype html>
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ImmoFlow</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Immoflow — Gestion immobilière</title>
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+<script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.development.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js"></script>
+<script src="https://unpkg.com/lucide-react@0.468.0/dist/umd/lucide-react.js"></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.0/babel.min.js"></script>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Roboto+Slab:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
 
 <style>
-
-* {
-  box-sizing: border-box;
+html{
+  scroll-behavior:smooth;
 }
 
-body {
-  margin: 0;
-  font-family: Arial, sans-serif;
-  background: #f4f6fa;
-  color: #172033;
+body{
+  margin:0;
+  background:#F2F4F3;
 }
 
 button,
 input,
-select {
-  font: inherit;
+select{
+  outline:none;
 }
 
-button {
-  cursor: pointer;
+button:disabled{
+  cursor:not-allowed;
 }
 
-.hidden {
-  display: none !important;
+::-webkit-scrollbar{
+  width:8px;
+  height:8px;
 }
 
-.auth {
-  min-height: 100vh;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
+::-webkit-scrollbar-thumb{
+  background:#cfcac4;
+  border-radius:10px;
 }
-
-.auth-card {
-  width: 100%;
-  max-width: 430px;
-  background: #fff;
-  padding: 30px;
-  border-radius: 18px;
-  box-shadow: 0 10px 40px rgba(0,0,0,.08);
-}
-
-.logo {
-  font-size: 30px;
-  font-weight: 800;
-  margin-bottom: 5px;
-}
-
-.logo span {
-  color: #2563eb;
-}
-
-.muted {
-  color: #64748b;
-}
-
-.field {
-  margin-bottom: 15px;
-}
-
-.field label {
-  display: block;
-  font-size: 14px;
-  font-weight: 600;
-  margin-bottom: 6px;
-}
-
-.field input,
-.field select {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #d7dce5;
-  border-radius: 9px;
-  background: white;
-}
-
-.primary {
-  background: #2563eb;
-  border: 0;
-  color: white;
-  padding: 11px 16px;
-  border-radius: 9px;
-  font-weight: 700;
-}
-
-.primary:hover {
-  background: #1d4ed8;
-}
-
-.secondary {
-  background: #e5e7eb;
-  border: 0;
-  padding: 11px 16px;
-  border-radius: 9px;
-}
-
-.full {
-  width: 100%;
-}
-
-.auth-switch {
-  text-align: center;
-  margin-top: 18px;
-}
-
-.link {
-  border: 0;
-  background: none;
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.app {
-  display: flex;
-  min-height: 100vh;
-}
-
-.sidebar {
-  width: 240px;
-  background: #111827;
-  color: white;
-  position: fixed;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  padding: 20px;
-  z-index: 20;
-}
-
-.side-logo {
-  font-size: 25px;
-  font-weight: 800;
-  margin-bottom: 30px;
-}
-
-.side-logo span {
-  color: #60a5fa;
-}
-
-.nav button {
-  display: block;
-  width: 100%;
-  border: 0;
-  background: transparent;
-  color: #cbd5e1;
-  text-align: left;
-  padding: 13px;
-  border-radius: 8px;
-  margin-bottom: 5px;
-}
-
-.nav button:hover,
-.nav button.active {
-  background: #1f2937;
-  color: white;
-}
-
-.logout {
-  position: absolute;
-  bottom: 20px;
-  left: 20px;
-  right: 20px;
-}
-
-.main {
-  margin-left: 240px;
-  width: calc(100% - 240px);
-  padding: 25px;
-}
-
-.top {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 25px;
-}
-
-.page {
-  display: none;
-}
-
-.page.active {
-  display: block;
-}
-
-.cards {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 15px;
-}
-
-.card {
-  background: white;
-  padding: 20px;
-  border-radius: 15px;
-  box-shadow: 0 3px 15px rgba(0,0,0,.05);
-}
-
-.card-title {
-  color: #64748b;
-  font-size: 14px;
-}
-
-.card-value {
-  font-size: 26px;
-  font-weight: 800;
-  margin-top: 8px;
-}
-
-.panel {
-  background: white;
-  padding: 20px;
-  border-radius: 15px;
-  margin-top: 20px;
-  box-shadow: 0 3px 15px rgba(0,0,0,.05);
-  overflow-x: auto;
-}
-
-.panel-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 15px;
-  gap: 10px;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  min-width: 600px;
-}
-
-th,
-td {
-  padding: 12px 8px;
-  border-bottom: 1px solid #edf0f4;
-  text-align: left;
-}
-
-.badge {
-  background: #ef4444;
-  color: white;
-  border-radius: 20px;
-  padding: 3px 7px;
-  font-size: 11px;
-}
-
-.notification {
-  padding: 15px;
-  border-bottom: 1px solid #eee;
-}
-
-.unread {
-  background: #eff6ff;
-}
-
-.modal {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,.5);
-  align-items: center;
-  justify-content: center;
-  padding: 20px;
-  z-index: 50;
-}
-
-.modal.show {
-  display: flex;
-}
-
-.modal-card {
-  background: white;
-  width: min(600px,100%);
-  padding: 25px;
-  border-radius: 16px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 20px;
-}
-
-.toast {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  background: #111827;
-  color: white;
-  padding: 14px 18px;
-  border-radius: 10px;
-  display: none;
-  z-index: 100;
-}
-
-.status-available {
-  color: #16a34a;
-  font-weight: 700;
-}
-
-.status-occupied {
-  color: #2563eb;
-  font-weight: 700;
-}
-
-.status-late {
-  color: #dc2626;
-  font-weight: 700;
-}
-
-.status-paid {
-  color: #16a34a;
-  font-weight: 700;
-}
-
-.status-pending {
-  color: #d97706;
-  font-weight: 700;
-}
-
-.empty {
-  color: #64748b;
-  padding: 20px 0;
-}
-
-@media(max-width:900px) {
-
-  .cards {
-    grid-template-columns: 1fr 1fr;
-  }
-
-}
-
-@media(max-width:800px) {
-
-  .sidebar {
-    width: 70px;
-    padding: 10px;
-  }
-
-  .side-logo {
-    font-size: 0;
-    text-align: center;
-  }
-
-  .side-logo span {
-    font-size: 22px;
-  }
-
-  .nav button {
-    font-size: 0;
-    text-align: center;
-  }
-
-  .nav button::first-letter {
-    font-size: 20px;
-  }
-
-  .logout {
-    font-size: 0;
-    padding: 10px;
-  }
-
-  .main {
-    margin-left: 70px;
-    width: calc(100% - 70px);
-    padding: 15px;
-  }
-
-}
-
-@media(max-width:500px) {
-
-  .cards {
-    grid-template-columns: 1fr;
-  }
-
-  .grid {
-    grid-template-columns: 1fr;
-  }
-
-  .top h1 {
-    font-size: 24px;
-  }
-
-}
-
 </style>
 </head>
 
 <body>
 
-
-<!-- =====================================================
-     AUTH
-====================================================== -->
-
-<div id="auth" class="auth">
-
-  <div class="auth-card">
-
-    <div class="logo">
-      Immo<span>Flow</span>
-    </div>
-
-    <p class="muted">
-      Gestion immobilière pour agences
-    </p>
-
-
-    <div id="login">
-
-      <h2>Connexion</h2>
-
-      <form id="loginForm">
-
-        <div class="field">
-          <label for="loginEmail">Email</label>
-          <input
-            id="loginEmail"
-            type="email"
-            autocomplete="email"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label for="loginPassword">
-            Mot de passe
-          </label>
-
-          <input
-            id="loginPassword"
-            type="password"
-            autocomplete="current-password"
-            required
-          >
-        </div>
-
-        <button
-          class="primary full"
-          type="submit"
-        >
-          Se connecter
-        </button>
-
-      </form>
-
-      <p class="auth-switch">
-        Pas encore de compte ?
-        <button
-          class="link"
-          type="button"
-          onclick="showRegister()"
-        >
-          Créer un compte
-        </button>
-      </p>
-
-    </div>
-
-
-    <div id="register" class="hidden">
-
-      <h2>Créer votre compte</h2>
-
-      <form id="registerForm">
-
-        <div class="field">
-          <label for="agency">
-            Nom de l'agence
-          </label>
-
-          <input
-            id="agency"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label for="name">
-            Votre nom
-          </label>
-
-          <input
-            id="name"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label for="email">
-            Email
-          </label>
-
-          <input
-            id="email"
-            type="email"
-            autocomplete="email"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label for="password">
-            Mot de passe
-          </label>
-
-          <input
-            id="password"
-            type="password"
-            minlength="6"
-            autocomplete="new-password"
-            required
-          >
-        </div>
-
-        <button
-          class="primary full"
-          type="submit"
-        >
-          Créer mon compte
-        </button>
-
-      </form>
-
-      <p class="auth-switch">
-        Déjà inscrit ?
-        <button
-          class="link"
-          type="button"
-          onclick="showLogin()"
-        >
-          Se connecter
-        </button>
-      </p>
-
-    </div>
-
-  </div>
-
-</div>
-
-
-<!-- =====================================================
-     APPLICATION
-====================================================== -->
-
-<div id="app" class="app hidden">
-
-  <aside class="sidebar">
-
-    <div class="side-logo">
-      Immo<span>Flow</span>
-    </div>
-
-    <div class="nav">
-
-      <button
-        class="active"
-        data-page="dashboard"
-        onclick="page('dashboard',this)"
-      >
-        🏠 Tableau de bord
-      </button>
-
-      <button
-        data-page="properties"
-        onclick="page('properties',this)"
-      >
-        🏢 Biens
-      </button>
-
-      <button
-        data-page="owners"
-        onclick="page('owners',this)"
-      >
-        👔 Propriétaires
-      </button>
-
-      <button
-        data-page="tenants"
-        onclick="page('tenants',this)"
-      >
-        👤 Locataires
-      </button>
-
-      <button
-        data-page="leases"
-        onclick="page('leases',this)"
-      >
-        📄 Baux
-      </button>
-
-      <button
-        data-page="payments"
-        onclick="page('payments',this)"
-      >
-        💰 Loyers
-      </button>
-
-      <button
-        data-page="notifications"
-        onclick="page('notifications',this)"
-      >
-        🔔 Notifications
-        <span
-          id="notificationBadge"
-          class="badge"
-        >
-          0
-        </span>
-      </button>
-
-      <button
-        data-page="messages"
-        onclick="page('messages',this)"
-      >
-        💬 Messages
-      </button>
-
-    </div>
-
-    <button
-      class="secondary logout"
-      type="button"
-      onclick="logout()"
-    >
-      Déconnexion
-    </button>
-
-  </aside>
-
-
-  <main class="main">
-
-    <div class="top">
-
-      <div>
-        <h1 id="pageTitle">
-          Tableau de bord
-        </h1>
-
-        <div
-          id="agencyName"
-          class="muted"
-        ></div>
-      </div>
-
-    </div>
-
-
-    <!-- DASHBOARD -->
-
-    <section
-      id="page-dashboard"
-      class="page active"
-    >
-
-      <div class="cards">
-
-        <div class="card">
-          <div class="card-title">
-            Biens
-          </div>
-
-          <div
-            id="statProperties"
-            class="card-value"
-          >
-            0
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            Locataires
-          </div>
-
-          <div
-            id="statTenants"
-            class="card-value"
-          >
-            0
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            Biens occupés
-          </div>
-
-          <div
-            id="statOccupied"
-            class="card-value"
-          >
-            0
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            Loyers en retard
-          </div>
-
-          <div
-            id="statLate"
-            class="card-value"
-          >
-            0 FCFA
-          </div>
-        </div>
-
-      </div>
-
-
-      <div class="panel">
-
-        <div class="panel-head">
-          <h2>
-            Résumé
-          </h2>
-        </div>
-
-        <p class="muted">
-          Bienvenue sur votre espace ImmoFlow.
-          Utilisez le menu pour gérer vos biens,
-          propriétaires, locataires, baux et loyers.
-        </p>
-
-      </div>
-
-    </section>
-
-
-    <!-- PROPERTIES -->
-
-    <section
-      id="page-properties"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Biens immobiliers
-          </h2>
-
-          <button
-            class="primary"
-            type="button"
-            onclick="openModal('propertyModal')"
-          >
-            + Ajouter
-          </button>
-
-        </div>
-
-        <div id="propertiesList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- OWNERS -->
-
-    <section
-      id="page-owners"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Propriétaires
-          </h2>
-
-          <button
-            class="primary"
-            type="button"
-            onclick="openModal('ownerModal')"
-          >
-            + Ajouter
-          </button>
-
-        </div>
-
-        <div id="ownersList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- TENANTS -->
-
-    <section
-      id="page-tenants"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Locataires
-          </h2>
-
-          <button
-            class="primary"
-            type="button"
-            onclick="openModal('tenantModal')"
-          >
-            + Ajouter
-          </button>
-
-        </div>
-
-        <div id="tenantsList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- LEASES -->
-
-    <section
-      id="page-leases"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Baux
-          </h2>
-
-          <button
-            class="primary"
-            type="button"
-            onclick="openModal('leaseModal')"
-          >
-            + Créer un bail
-          </button>
-
-        </div>
-
-        <div id="leasesList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- PAYMENTS -->
-
-    <section
-      id="page-payments"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Loyers
-          </h2>
-
-          <button
-            class="primary"
-            type="button"
-            onclick="openModal('paymentModal')"
-          >
-            + Enregistrer un loyer
-          </button>
-
-        </div>
-
-        <div id="paymentsList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- NOTIFICATIONS -->
-
-    <section
-      id="page-notifications"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Notifications
-          </h2>
-
-          <button
-            class="secondary"
-            type="button"
-            onclick="readAll()"
-          >
-            Tout marquer comme lu
-          </button>
-
-        </div>
-
-        <div id="notificationsList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-
-    <!-- MESSAGES -->
-
-    <section
-      id="page-messages"
-      class="page"
-    >
-
-      <div class="panel">
-
-        <div class="panel-head">
-
-          <h2>
-            Messages automatiques
-          </h2>
-
-        </div>
-
-        <div id="messagesList">
-          Chargement...
-        </div>
-
-      </div>
-
-    </section>
-
-  </main>
-
-</div>
-
-
-<!-- =====================================================
-     OWNER MODAL
-====================================================== -->
-
-<div
-  id="ownerModal"
-  class="modal"
->
-
-  <div class="modal-card">
-
-    <h2>
-      Ajouter un propriétaire
-    </h2>
-
-    <form id="ownerForm">
-
-      <div class="field">
-        <label>
-          Nom
-        </label>
-
-        <input
-          name="name"
-          required
-        >
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Téléphone
-          </label>
-
-          <input
-            name="phone"
-            type="tel"
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Email
-          </label>
-
-          <input
-            name="email"
-            type="email"
-          >
-        </div>
-
-      </div>
-
-      <div class="field">
-        <label>
-          Adresse
-        </label>
-
-        <input
-          name="address"
-        >
-      </div>
-
-      <div class="actions">
-
-        <button
-          type="button"
-          class="secondary"
-          onclick="closeModals()"
-        >
-          Annuler
-        </button>
-
-        <button
-          type="submit"
-          class="primary"
-        >
-          Enregistrer
-        </button>
-
-      </div>
-
-    </form>
-
-  </div>
-
-</div>
-
-
-<!-- =====================================================
-     PROPERTY MODAL
-====================================================== -->
-
-<div
-  id="propertyModal"
-  class="modal"
->
-
-  <div class="modal-card">
-
-    <h2>
-      Ajouter un bien
-    </h2>
-
-    <form id="propertyForm">
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Référence
-          </label>
-
-          <input
-            name="reference"
-            placeholder="IMMO-001"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Type
-          </label>
-
-          <select name="type">
-            <option>
-              Appartement
-            </option>
-
-            <option>
-              Maison
-            </option>
-
-            <option>
-              Villa
-            </option>
-
-            <option>
-              Bureau
-            </option>
-
-            <option>
-              Commerce
-            </option>
-
-            <option>
-              Terrain
-            </option>
-          </select>
-        </div>
-
-      </div>
-
-      <div class="field">
-        <label>
-          Nom du bien
-        </label>
-
-        <input
-          name="title"
-          placeholder="Appartement F3"
-          required
-        >
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Propriétaire
-          </label>
-
-          <select
-            id="ownerSelect"
-            name="owner_id"
-          >
-            <option value="">
-              Aucun
-            </option>
-          </select>
-        </div>
-
-        <div class="field">
-          <label>
-            Chambres
-          </label>
-
-          <input
-            name="bedrooms"
-            type="number"
-            min="0"
-            value="0"
-          >
-        </div>
-
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Loyer mensuel
-          </label>
-
-          <input
-            name="rent"
-            type="number"
-            min="0"
-            value="0"
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Ville
-          </label>
-
-          <input
-            name="city"
-            value="Thiès"
-          >
-        </div>
-
-      </div>
-
-      <div class="field">
-        <label>
-          Adresse
-        </label>
-
-        <input
-          name="address"
-        >
-      </div>
-
-      <div class="actions">
-
-        <button
-          type="button"
-          class="secondary"
-          onclick="closeModals()"
-        >
-          Annuler
-        </button>
-
-        <button
-          type="submit"
-          class="primary"
-        >
-          Enregistrer
-        </button>
-
-      </div>
-
-    </form>
-
-  </div>
-
-</div>
-
-
-<!-- =====================================================
-     TENANT MODAL
-====================================================== -->
-
-<div
-  id="tenantModal"
-  class="modal"
->
-
-  <div class="modal-card">
-
-    <h2>
-      Ajouter un locataire
-    </h2>
-
-    <form id="tenantForm">
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Prénom
-          </label>
-
-          <input
-            name="first_name"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Nom
-          </label>
-
-          <input
-            name="last_name"
-            required
-          >
-        </div>
-
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Téléphone
-          </label>
-
-          <input
-            name="phone"
-            type="tel"
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Email
-          </label>
-
-          <input
-            name="email"
-            type="email"
-          >
-        </div>
-
-      </div>
-
-      <div class="field">
-        <label>
-          Adresse
-        </label>
-
-        <input
-          name="address"
-        >
-      </div>
-
-      <div class="actions">
-
-        <button
-          type="button"
-          class="secondary"
-          onclick="closeModals()"
-        >
-          Annuler
-        </button>
-
-        <button
-          type="submit"
-          class="primary"
-        >
-          Enregistrer
-        </button>
-
-      </div>
-
-    </form>
-
-  </div>
-
-</div>
-
-
-<!-- =====================================================
-     LEASE MODAL
-====================================================== -->
-
-<div
-  id="leaseModal"
-  class="modal"
->
-
-  <div class="modal-card">
-
-    <h2>
-      Créer un bail
-    </h2>
-
-    <form id="leaseForm">
-
-      <div class="field">
-        <label>
-          Bien
-        </label>
-
-        <select
-          id="leaseProperty"
-          name="property_id"
-          required
-        >
-          <option value="">
-            Chargement...
-          </option>
-        </select>
-      </div>
-
-      <div class="field">
-        <label>
-          Locataire
-        </label>
-
-        <select
-          id="leaseTenant"
-          name="tenant_id"
-          required
-        >
-          <option value="">
-            Chargement...
-          </option>
-        </select>
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Date de début
-          </label>
-
-          <input
-            name="start_date"
-            type="date"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Date de fin
-          </label>
-
-          <input
-            name="end_date"
-            type="date"
-          >
-        </div>
-
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Loyer mensuel
-          </label>
-
-          <input
-            name="monthly_rent"
-            type="number"
-            min="1"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Dépôt de garantie
-          </label>
-
-          <input
-            name="deposit"
-            type="number"
-            min="0"
-            value="0"
-          >
-        </div>
-
-      </div>
-
-      <div class="actions">
-
-        <button
-          type="button"
-          class="secondary"
-          onclick="closeModals()"
-        >
-          Annuler
-        </button>
-
-        <button
-          type="submit"
-          class="primary"
-        >
-          Créer le bail
-        </button>
-
-      </div>
-
-    </form>
-
-  </div>
-
-</div>
-
-
-<!-- =====================================================
-     PAYMENT MODAL
-====================================================== -->
-
-<div
-  id="paymentModal"
-  class="modal"
->
-
-  <div class="modal-card">
-
-    <h2>
-      Enregistrer un loyer
-    </h2>
-
-    <form id="paymentForm">
-
-      <div class="field">
-        <label>
-          Bail
-        </label>
-
-        <select
-          id="paymentLease"
-          name="lease_id"
-          required
-        >
-          <option value="">
-            Chargement...
-          </option>
-        </select>
-      </div>
-
-      <div class="grid">
-
-        <div class="field">
-          <label>
-            Montant
-          </label>
-
-          <input
-            name="amount"
-            type="number"
-            min="1"
-            required
-          >
-        </div>
-
-        <div class="field">
-          <label>
-            Date d'échéance
-          </label>
-
-          <input
-            name="due_date"
-            type="date"
-            required
-          >
-        </div>
-
-      </div>
-
-      <div class="field">
-        <label>
-          Mode de paiement
-        </label>
-
-        <select name="payment_method">
-
-          <option value="">
-            Non précisé
-          </option>
-
-          <option value="Wave">
-            Wave
-          </option>
-
-          <option value="Orange Money">
-            Orange Money
-          </option>
-
-          <option value="Espèces">
-            Espèces
-          </option>
-
-          <option value="Virement">
-            Virement bancaire
-          </option>
-
-          <option value="Chèque">
-            Chèque
-          </option>
-
-        </select>
-      </div>
-
-      <div class="actions">
-
-        <button
-          type="button"
-          class="secondary"
-          onclick="closeModals()"
-        >
-          Annuler
-        </button>
-
-        <button
-          type="submit"
-          class="primary"
-        >
-          Enregistrer
-        </button>
-
-      </div>
-
-    </form>
-
-  </div>
-
-</div>
-
-
-<div
-  id="toast"
-  class="toast"
-></div>
-
-
-<script>
-
-"use strict";
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+
+const { useState, useEffect, useMemo } = React;
+
+const lucide =
+  window.lucideReact ||
+  window.LucideReact ||
+  {};
+
+const fallbackIcon = ({
+  size = 18,
+  ...props
+}) =>
+  React.createElement(
+    "span",
+    {
+      style:{
+        display:"inline-flex",
+        width:size,
+        height:size,
+        alignItems:"center",
+        justifyContent:"center"
+      },
+      ...props
+    },
+    "•"
+  );
+
+const Plus = lucide.Plus || fallbackIcon;
+const X = lucide.X || fallbackIcon;
+const Phone = lucide.Phone || fallbackIcon;
+const MapPin = lucide.MapPin || fallbackIcon;
+const AlertCircle = lucide.AlertCircle || fallbackIcon;
+const CheckCircle2 = lucide.CheckCircle2 || fallbackIcon;
+const TrendingUp = lucide.TrendingUp || fallbackIcon;
+const Home = lucide.Home || fallbackIcon;
+const Users = lucide.Users || fallbackIcon;
+const LogOut = lucide.LogOut || fallbackIcon;
+const ArrowRight = lucide.ArrowRight || fallbackIcon;
+const Check = lucide.Check || fallbackIcon;
+const Menu = lucide.Menu || fallbackIcon;
+const Building2 = lucide.Building2 || fallbackIcon;
+const UserRound = lucide.UserRound || fallbackIcon;
+const FileText = lucide.FileText || fallbackIcon;
+const Wallet = lucide.Wallet || fallbackIcon;
+const Bell = lucide.Bell || fallbackIcon;
+const MessageCircle = lucide.MessageCircle || fallbackIcon;
+
+const NAVY = "#14213D";
+const GOLD = "#C9A227";
+const GREEN = "#2F6D4F";
+const RUST = "#B5432B";
+
+const MONTHS = [
+  "Jan","Fév","Mar","Avr","Mai","Juin",
+  "Juil","Août","Sep","Oct","Nov","Déc"
+];
+
+const CURRENT_MONTH = 7;
 
 
 /* =========================================================
    API FRONTEND
 ========================================================= */
 
-async function api(url, options) {
+async function api(path, options = {}) {
 
-  const config = options || {};
+  const response = await fetch(path, {
+    credentials:"same-origin",
+    ...options,
+    headers:{
+      ...(options.body
+        ? {"content-type":"application/json"}
+        : {}),
+      ...(options.headers || {})
+    }
+  });
 
-  config.headers = {
-    ...(config.headers || {}),
-    "Content-Type": "application/json"
-  };
-
-  const response =
-    await fetch(url, {
-      credentials: "same-origin",
-      ...config
-    });
-
-  let data = null;
+  let data = {};
 
   try {
     data = await response.json();
   } catch {
-    data = null;
+    data = {};
   }
 
   if (!response.ok) {
-
     throw new Error(
-      data && data.error
-        ? data.error
-        : "Une erreur est survenue."
+      data.error ||
+      "Une erreur est survenue."
     );
   }
 
@@ -3480,243 +1481,649 @@ async function api(url, options) {
 }
 
 
-/* =========================================================
-   AUTH DISPLAY
-========================================================= */
-
-function showRegister() {
-
-  document
-    .getElementById("login")
-    .classList.add("hidden");
-
-  document
-    .getElementById("register")
-    .classList.remove("hidden");
+function formatFCFA(value) {
+  return Number(value || 0)
+    .toLocaleString("fr-FR") +
+    " FCFA";
 }
 
 
-function showLogin() {
-
-  document
-    .getElementById("register")
-    .classList.add("hidden");
-
-  document
-    .getElementById("login")
-    .classList.remove("hidden");
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
 }
 
 
 /* =========================================================
-   TOAST
+   LANDING PAGE
 ========================================================= */
 
-let toastTimer = null;
+function Landing({
+  onLogin,
+  onSignup,
+  onSelectPlan
+}) {
 
-function toast(message) {
+  const [menuOpen,setMenuOpen] =
+    useState(false);
 
-  const element =
-    document.getElementById("toast");
+  const plans = [
+    {
+      id:"starter",
+      name:"Starter",
+      price:"5 000 FCFA/mois",
+      desc:"Pour démarrer",
+      features:[
+        "Jusqu'à 3 biens",
+        "Suivi des paiements",
+        "1 utilisateur"
+      ],
+      cta:"Commencer",
+      waveLink:
+        "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=5000"
+    },
+    {
+      id:"pro",
+      name:"Pro",
+      price:"10 000 FCFA/mois",
+      desc:"Pour les bailleurs actifs",
+      features:[
+        "Jusqu'à 10 biens",
+        "Rappels automatiques",
+        "3 utilisateurs"
+      ],
+      cta:"Choisir Pro",
+      highlight:true,
+      waveLink:
+        "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=10000"
+    },
+    {
+      id:"agence",
+      name:"Agence",
+      price:"25 000 FCFA/mois",
+      desc:"Pour les agences immobilières",
+      features:[
+        "Biens illimités (10+)",
+        "Vue par propriétaire",
+        "Utilisateurs illimités"
+      ],
+      cta:"Choisir Agence",
+      waveLink:
+        "https://pay.wave.com/m/M_sn_47KnWYA3OS8c/c/sn/?amount=25000"
+    }
+  ];
 
-  element.textContent =
-    String(message || "");
+  return (
+    <div
+      style={{
+        fontFamily:"Inter,sans-serif",
+        color:NAVY
+      }}
+    >
 
-  element.style.display =
-    "block";
+      <nav className="sticky top-0 z-40 bg-white border-b border-stone-200">
 
-  clearTimeout(toastTimer);
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
 
-  toastTimer =
-    setTimeout(
-      function () {
-        element.style.display =
-          "none";
-      },
-      3000
-    );
+          <div className="flex items-center gap-2.5">
+
+            <div
+              className="font-bold text-2xl"
+              style={{
+                fontFamily:"Roboto Slab,serif",
+                color:NAVY
+              }}
+            >
+              Immo<span style={{color:GOLD}}>flow</span>
+            </div>
+
+          </div>
+
+          <div className="hidden md:flex items-center gap-8 text-sm font-medium">
+
+            <a
+              href="#fonctionnalites"
+              className="hover:opacity-70"
+            >
+              Fonctionnalités
+            </a>
+
+            <a
+              href="#tarifs"
+              className="hover:opacity-70"
+            >
+              Tarifs
+            </a>
+
+          </div>
+
+          <div className="hidden md:flex items-center gap-3">
+
+            <button
+              onClick={onLogin}
+              className="text-sm font-medium px-3 py-2"
+            >
+              Connexion
+            </button>
+
+            <button
+              onClick={onSignup}
+              className="text-sm font-medium px-4 py-2 rounded text-white"
+              style={{backgroundColor:NAVY}}
+            >
+              Essayer gratuitement
+            </button>
+
+          </div>
+
+          <button
+            className="md:hidden"
+            onClick={() => setMenuOpen(v => !v)}
+          >
+            <Menu size={22}/>
+          </button>
+
+        </div>
+
+        {menuOpen && (
+          <div className="md:hidden border-t border-stone-200 px-6 py-3 flex flex-col gap-3">
+
+            <button
+              onClick={onLogin}
+              className="text-sm font-medium text-left"
+            >
+              Connexion
+            </button>
+
+            <button
+              onClick={onSignup}
+              className="text-sm font-medium text-left px-4 py-2 rounded text-white w-fit"
+              style={{backgroundColor:NAVY}}
+            >
+              Essayer gratuitement
+            </button>
+
+          </div>
+        )}
+
+      </nav>
+
+
+      <header
+        style={{backgroundColor:NAVY}}
+        className="text-white"
+      >
+
+        <div className="max-w-6xl mx-auto px-6 py-20 text-center">
+
+          <span
+            className="inline-block px-3 py-1 rounded-full text-xs font-medium mb-5"
+            style={{
+              backgroundColor:"rgba(201,162,39,0.15)",
+              color:GOLD,
+              border:"1px solid "+GOLD
+            }}
+          >
+            Pensé pour les agences et bailleurs au Sénégal
+          </span>
+
+          <h1
+            className="text-3xl sm:text-5xl font-bold mb-5 leading-tight max-w-3xl mx-auto"
+            style={{
+              fontFamily:"Roboto Slab,serif"
+            }}
+          >
+            Le suivi de vos loyers,
+            sans carnet ni tableur
+          </h1>
+
+          <p className="text-stone-300 max-w-xl mx-auto mb-8 text-base sm:text-lg">
+            Centralisez vos biens, suivez chaque loyer payé ou en retard,
+            et gagnez du temps — que vous gériez 2 appartements ou tout
+            un portefeuille.
+          </p>
+
+          <div className="flex flex-col sm:flex-row gap-3 justify-center">
+
+            <button
+              onClick={onSignup}
+              className="px-6 py-3 rounded font-medium flex items-center justify-center gap-2"
+              style={{
+                backgroundColor:GOLD,
+                color:NAVY
+              }}
+            >
+              Créer mon compte gratuit
+              <ArrowRight size={16}/>
+            </button>
+
+            <button
+              onClick={onLogin}
+              className="px-6 py-3 rounded font-medium border border-stone-500 text-white"
+            >
+              J'ai déjà un compte
+            </button>
+
+          </div>
+
+        </div>
+
+      </header>
+
+
+      <section
+        id="fonctionnalites"
+        className="max-w-6xl mx-auto px-6 py-16"
+      >
+
+        <h2
+          className="text-2xl font-bold text-center mb-10"
+          style={{
+            fontFamily:"Roboto Slab,serif"
+          }}
+        >
+          Tout ce qu'il faut, rien de superflu
+        </h2>
+
+        <div className="grid sm:grid-cols-3 gap-6">
+
+          {[
+            {
+              icon:Home,
+              title:"Registre des biens",
+              desc:"Centralisez tous vos biens et unités, quel que soit le nombre de propriétés que vous gérez."
+            },
+            {
+              icon:Users,
+              title:"Suivi des locataires",
+              desc:"Coordonnées, loyer, jour d'échéance — tout au même endroit, par bien ou vue d'ensemble."
+            },
+            {
+              icon:TrendingUp,
+              title:"Statut des paiements",
+              desc:"Un coup d'œil suffit pour voir qui a payé ce mois-ci et qui est en retard."
+            }
+          ].map((f,i) => {
+
+            const Icon = f.icon;
+
+            return (
+              <div
+                key={i}
+                className="p-5 rounded-lg border border-stone-200 bg-white"
+              >
+
+                <div
+                  className="w-10 h-10 rounded flex items-center justify-center mb-3"
+                  style={{backgroundColor:"#F2F4F3"}}
+                >
+                  <Icon size={20} color={NAVY}/>
+                </div>
+
+                <h3 className="font-semibold mb-1.5">
+                  {f.title}
+                </h3>
+
+                <p className="text-sm text-stone-500">
+                  {f.desc}
+                </p>
+
+              </div>
+            );
+          })}
+
+        </div>
+
+      </section>
+
+
+      <section
+        id="tarifs"
+        style={{backgroundColor:"#F2F4F3"}}
+        className="py-16"
+      >
+
+        <div className="max-w-5xl mx-auto px-6">
+
+          <h2
+            className="text-2xl font-bold text-center mb-10"
+            style={{
+              fontFamily:"Roboto Slab,serif"
+            }}
+          >
+            Tarifs simples, sans surprise
+          </h2>
+
+          <div className="grid sm:grid-cols-3 gap-6">
+
+            {plans.map((plan,i) => (
+
+              <div
+                key={i}
+                className="rounded-lg p-6 bg-white flex flex-col"
+                style={
+                  plan.highlight
+                    ? {
+                        border:"2px solid "+GOLD
+                      }
+                    : {
+                        border:"1px solid #e7e5e4"
+                      }
+                }
+              >
+
+                {plan.highlight && (
+                  <span
+                    className="text-xs font-semibold mb-2 w-fit px-2 py-0.5 rounded-full"
+                    style={{
+                      backgroundColor:GOLD,
+                      color:NAVY
+                    }}
+                  >
+                    Populaire
+                  </span>
+                )}
+
+                <h3
+                  className="font-semibold text-lg"
+                  style={{
+                    fontFamily:"Roboto Slab,serif"
+                  }}
+                >
+                  {plan.name}
+                </h3>
+
+                <div
+                  className="text-xl font-bold my-2"
+                  style={{
+                    fontFamily:"IBM Plex Mono,monospace"
+                  }}
+                >
+                  {plan.price}
+                </div>
+
+                <p className="text-sm text-stone-500 mb-4">
+                  {plan.desc}
+                </p>
+
+                <ul className="space-y-2 mb-6 flex-1">
+
+                  {plan.features.map((f,j) => (
+
+                    <li
+                      key={j}
+                      className="flex items-center gap-2 text-sm text-stone-600"
+                    >
+                      <Check size={14} color={GREEN}/>
+                      {f}
+                    </li>
+
+                  ))}
+
+                </ul>
+
+                <button
+                  onClick={() => onSelectPlan(plan)}
+                  className="w-full py-2 rounded font-medium text-sm"
+                  style={
+                    plan.highlight
+                      ? {
+                          backgroundColor:NAVY,
+                          color:"white"
+                        }
+                      : {
+                          border:"1px solid "+NAVY,
+                          color:NAVY
+                        }
+                  }
+                >
+                  {plan.cta}
+                </button>
+
+              </div>
+
+            ))}
+
+          </div>
+
+        </div>
+
+      </section>
+
+
+      <footer
+        style={{backgroundColor:NAVY}}
+        className="text-stone-400 text-sm py-8 text-center"
+      >
+        © 2026 Immoflow — gestion immobilière simplifiée.
+      </footer>
+
+    </div>
+  );
 }
 
 
 /* =========================================================
-   NAVIGATION
+   AUTH
 ========================================================= */
 
-const pageTitles = {
-  dashboard: "Tableau de bord",
-  properties: "Biens immobiliers",
-  owners: "Propriétaires",
-  tenants: "Locataires",
-  leases: "Baux",
-  payments: "Loyers",
-  notifications: "Notifications",
-  messages: "Messages"
-};
+function AuthPage({
+  mode,
+  onSuccess,
+  onSwitch,
+  onBack
+}) {
 
+  const [agency,setAgency] = useState("");
+  const [name,setName] = useState("");
+  const [email,setEmail] = useState("");
+  const [password,setPassword] = useState("");
+  const [loading,setLoading] = useState(false);
+  const [error,setError] = useState("");
 
-function page(name, button) {
+  async function submit() {
 
-  document
-    .querySelectorAll(".page")
-    .forEach(function (section) {
-      section.classList.remove("active");
-    });
+    setError("");
+    setLoading(true);
 
-  const target =
-    document.getElementById(
-      "page-" + name
-    );
+    try {
 
-  if (target) {
-    target.classList.add("active");
+      const endpoint =
+        mode === "login"
+          ? "/api/login"
+          : "/api/register";
+
+      const body =
+        mode === "login"
+          ? {
+              email,
+              password
+            }
+          : {
+              agency_name:agency,
+              name,
+              email,
+              password
+            };
+
+      const data = await api(
+        endpoint,
+        {
+          method:"POST",
+          body:JSON.stringify(body)
+        }
+      );
+
+      onSuccess(data.user);
+
+    } catch (err) {
+
+      setError(
+        err.message ||
+        "Une erreur est survenue."
+      );
+
+    } finally {
+      setLoading(false);
+    }
   }
 
-  document
-    .querySelectorAll(".nav button")
-    .forEach(function (item) {
-      item.classList.remove("active");
-    });
 
-  if (button) {
-    button.classList.add("active");
-  }
+  return (
 
-  document
-    .getElementById("pageTitle")
-    .textContent =
-      pageTitles[name] ||
-      "ImmoFlow";
+    <div
+      className="min-h-screen flex items-center justify-center px-4"
+      style={{
+        backgroundColor:"#F2F4F3",
+        fontFamily:"Inter,sans-serif"
+      }}
+    >
 
-  loadPageData(name);
-}
+      <div className="bg-white rounded-lg shadow-sm border border-stone-200 p-8 w-full max-w-sm">
 
+        <button
+          onClick={onBack}
+          className="text-xs text-stone-400 mb-4"
+        >
+          ← Retour au site
+        </button>
 
-async function loadPageData(name) {
+        <div className="mb-6">
 
-  try {
+          <div
+            className="font-bold text-2xl"
+            style={{
+              fontFamily:"Roboto Slab,serif"
+            }}
+          >
+            Immo<span style={{color:GOLD}}>flow</span>
+          </div>
 
-    if (name === "dashboard") {
-      await loadDashboard();
-    }
+        </div>
 
-    if (name === "properties") {
-      await loadProperties();
-    }
+        <h2
+          className="font-semibold text-lg mb-1"
+        >
+          {mode === "login"
+            ? "Connexion"
+            : "Créer un compte"}
+        </h2>
 
-    if (name === "owners") {
-      await loadOwners();
-    }
+        <p className="text-sm text-stone-500 mb-5">
 
-    if (name === "tenants") {
-      await loadTenants();
-    }
+          {mode === "login"
+            ? "Accédez à votre espace de gestion."
+            : "Démarrez gratuitement, sans carte bancaire."}
 
-    if (name === "leases") {
-      await loadLeases();
-    }
-
-    if (name === "payments") {
-      await loadPayments();
-    }
-
-    if (name === "notifications") {
-      await loadNotifications();
-    }
-
-    if (name === "messages") {
-      await loadMessages();
-    }
-
-  } catch (error) {
-
-    toast(error.message);
-
-  }
-}
+        </p>
 
 
-/* =========================================================
-   SESSION
-========================================================= */
-
-async function checkSession() {
-
-  try {
-
-    const data =
-      await api("/api/me");
-
-    if (data.user) {
-
-      showApp(data.user);
-
-    } else {
-
-      showAuth();
-
-    }
-
-  } catch {
-
-    showAuth();
-
-  }
-}
+        {error && (
+          <div
+            className="mb-4 rounded border p-3 text-sm"
+            style={{
+              borderColor:"#f0b4aa",
+              backgroundColor:"#fff5f3",
+              color:RUST
+            }}
+          >
+            {error}
+          </div>
+        )}
 
 
-function showAuth() {
+        <div className="space-y-3">
 
-  document
-    .getElementById("auth")
-    .classList.remove("hidden");
+          {mode === "signup" && (
+            <>
+              <input
+                className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+                placeholder="Nom de l'agence"
+                value={agency}
+                onChange={e => setAgency(e.target.value)}
+              />
 
-  document
-    .getElementById("app")
-    .classList.add("hidden");
-}
+              <input
+                className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+                placeholder="Votre nom"
+                value={name}
+                onChange={e => setName(e.target.value)}
+              />
+            </>
+          )}
+
+          <input
+            type="email"
+            className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+            placeholder="Adresse e-mail"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+          />
+
+          <input
+            type="password"
+            className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+            placeholder="Mot de passe"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === "Enter") submit();
+            }}
+          />
+
+        </div>
 
 
-function showApp(user) {
-
-  document
-    .getElementById("auth")
-    .classList.add("hidden");
-
-  document
-    .getElementById("app")
-    .classList.remove("hidden");
-
-  document
-    .getElementById("agencyName")
-    .textContent =
-      user.agency_name +
-      " • " +
-      user.name;
-
-  refreshAll();
-}
+        <button
+          onClick={submit}
+          disabled={loading}
+          className="w-full mt-5 py-2.5 rounded font-medium text-white text-sm disabled:opacity-60"
+          style={{backgroundColor:NAVY}}
+        >
+          {loading
+            ? "Chargement..."
+            : mode === "login"
+              ? "Se connecter"
+              : "Créer mon compte"}
+        </button>
 
 
-async function logout() {
+        <p className="text-xs text-stone-400 text-center mt-4">
 
-  try {
+          {mode === "login" ? (
+            <>
+              Pas encore de compte ?
+              {" "}
+              <button
+                onClick={() => onSwitch("signup")}
+                className="underline"
+              >
+                Inscrivez-vous
+              </button>
+            </>
+          ) : (
+            <>
+              Déjà un compte ?
+              {" "}
+              <button
+                onClick={() => onSwitch("login")}
+                className="underline"
+              >
+                Connectez-vous
+              </button>
+            </>
+          )}
 
-    await api(
-      "/api/logout",
-      {
-        method: "POST"
-      }
-    );
+        </p>
 
-    showAuth();
+      </div>
 
-    showLogin();
-
-  } catch (error) {
-
-    toast(error.message);
-
-  }
+    </div>
+  );
 }
 
 
@@ -3724,891 +2131,862 @@ async function logout() {
    DASHBOARD
 ========================================================= */
 
-async function loadDashboard() {
-
-  const data =
-    await api("/api/dashboard");
-
-  document
-    .getElementById("statProperties")
-    .textContent =
-      Number(
-        data.properties || 0
-      ).toLocaleString("fr-FR");
-
-  document
-    .getElementById("statTenants")
-    .textContent =
-      Number(
-        data.tenants || 0
-      ).toLocaleString("fr-FR");
-
-  document
-    .getElementById("statOccupied")
-    .textContent =
-      Number(
-        data.occupied || 0
-      ).toLocaleString("fr-FR");
-
-  document
-    .getElementById("statLate")
-    .textContent =
-      Number(
-        data.late || 0
-      ).toLocaleString("fr-FR") +
-      " FCFA";
-
-  document
-    .getElementById("notificationBadge")
-    .textContent =
-      Number(
-        data.unread || 0
-      );
-}
-
-
-/* =========================================================
-   PROPERTIES
-========================================================= */
-
-async function loadProperties() {
-
-  const data =
-    await api("/api/properties");
-
-  const element =
-    document.getElementById(
-      "propertiesList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun bien enregistré.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    "<table>" +
-      "<thead>" +
-        "<tr>" +
-          "<th>Référence</th>" +
-          "<th>Bien</th>" +
-          "<th>Propriétaire</th>" +
-          "<th>Ville</th>" +
-          "<th>Loyer</th>" +
-          "<th>Statut</th>" +
-        "</tr>" +
-      "</thead>" +
-      "<tbody>" +
-
-        data.map(function (x) {
-
-          return (
-            "<tr>" +
-              "<td>" +
-                escapeHtml(x.reference) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.title) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.owner_name || "—"
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.city || "—") +
-              "</td>" +
-
-              "<td>" +
-                Number(
-                  x.rent || 0
-                ).toLocaleString("fr-FR") +
-                " FCFA" +
-              "</td>" +
-
-              "<td class='status-" +
-                escapeHtml(x.status) +
-                "'>" +
-                escapeHtml(
-                  formatStatus(x.status)
-                ) +
-              "</td>" +
-
-            "</tr>"
-          );
-
-        }).join("") +
-
-      "</tbody>" +
-    "</table>";
-}
-
-
-/* =========================================================
-   OWNERS
-========================================================= */
-
-async function loadOwners() {
-
-  const data =
-    await api("/api/owners");
-
-  const element =
-    document.getElementById(
-      "ownersList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun propriétaire.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    "<table>" +
-      "<thead>" +
-        "<tr>" +
-          "<th>Nom</th>" +
-          "<th>Téléphone</th>" +
-          "<th>Email</th>" +
-          "<th>Adresse</th>" +
-        "</tr>" +
-      "</thead>" +
-
-      "<tbody>" +
-
-        data.map(function (x) {
-
-          return (
-            "<tr>" +
-
-              "<td>" +
-                escapeHtml(x.name) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.phone || "—") +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.email || "—") +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.address || "—") +
-              "</td>" +
-
-            "</tr>"
-          );
-
-        }).join("") +
-
-      "</tbody>" +
-    "</table>";
-}
-
-
-/* =========================================================
-   TENANTS
-========================================================= */
-
-async function loadTenants() {
-
-  const data =
-    await api("/api/tenants");
-
-  const element =
-    document.getElementById(
-      "tenantsList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun locataire.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    "<table>" +
-
-      "<thead>" +
-        "<tr>" +
-          "<th>Nom</th>" +
-          "<th>Téléphone</th>" +
-          "<th>Email</th>" +
-          "<th>Adresse</th>" +
-        "</tr>" +
-      "</thead>" +
-
-      "<tbody>" +
-
-        data.map(function (x) {
-
-          return (
-            "<tr>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.first_name
-                ) +
-                " " +
-                escapeHtml(
-                  x.last_name
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.phone || "—") +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.email || "—") +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(x.address || "—") +
-              "</td>" +
-
-            "</tr>"
-          );
-
-        }).join("") +
-
-      "</tbody>" +
-
-    "</table>";
-}
-
-
-/* =========================================================
-   LEASES
-========================================================= */
-
-async function loadLeases() {
-
-  const data =
-    await api("/api/leases");
-
-  const element =
-    document.getElementById(
-      "leasesList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun bail.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    "<table>" +
-
-      "<thead>" +
-        "<tr>" +
-          "<th>Bien</th>" +
-          "<th>Locataire</th>" +
-          "<th>Début</th>" +
-          "<th>Fin</th>" +
-          "<th>Loyer</th>" +
-          "<th>Statut</th>" +
-        "</tr>" +
-      "</thead>" +
-
-      "<tbody>" +
-
-        data.map(function (x) {
-
-          return (
-            "<tr>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.reference
-                ) +
-                " - " +
-                escapeHtml(
-                  x.property_title
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.first_name
-                ) +
-                " " +
-                escapeHtml(
-                  x.last_name
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.start_date
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.end_date || "—"
-                ) +
-              "</td>" +
-
-              "<td>" +
-                Number(
-                  x.monthly_rent || 0
-                ).toLocaleString("fr-FR") +
-                " FCFA" +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  formatStatus(x.status)
-                ) +
-              "</td>" +
-
-            "</tr>"
-          );
-
-        }).join("") +
-
-      "</tbody>" +
-
-    "</table>";
-}
-
-
-/* =========================================================
-   PAYMENTS
-========================================================= */
-
-async function loadPayments() {
-
-  const data =
-    await api("/api/payments");
-
-  const element =
-    document.getElementById(
-      "paymentsList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun loyer enregistré.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    "<table>" +
-
-      "<thead>" +
-        "<tr>" +
-          "<th>Locataire</th>" +
-          "<th>Bien</th>" +
-          "<th>Montant</th>" +
-          "<th>Échéance</th>" +
-          "<th>Statut</th>" +
-          "<th>Action</th>" +
-        "</tr>" +
-      "</thead>" +
-
-      "<tbody>" +
-
-        data.map(function (x) {
-
-          const action =
-            x.status !== "paid"
-              ? (
-                  "<button " +
-                    "class='primary' " +
-                    "type='button' " +
-                    "onclick='markPaid(" +
-                    Number(x.id) +
-                    ")'>" +
-                    "Payé" +
-                  "</button>"
-                )
-              : "✓";
-
-          return (
-            "<tr>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.first_name
-                ) +
-                " " +
-                escapeHtml(
-                  x.last_name
-                ) +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.reference
-                ) +
-              "</td>" +
-
-              "<td>" +
-                Number(
-                  x.amount || 0
-                ).toLocaleString("fr-FR") +
-                " FCFA" +
-              "</td>" +
-
-              "<td>" +
-                escapeHtml(
-                  x.due_date
-                ) +
-              "</td>" +
-
-              "<td class='status-" +
-                escapeHtml(x.status) +
-                "'>" +
-                escapeHtml(
-                  formatStatus(x.status)
-                ) +
-              "</td>" +
-
-              "<td>" +
-                action +
-              "</td>" +
-
-            "</tr>"
-          );
-
-        }).join("") +
-
-      "</tbody>" +
-
-    "</table>";
-}
-
-
-/* =========================================================
-   NOTIFICATIONS
-========================================================= */
-
-async function loadNotifications() {
-
-  const data =
-    await api("/api/notifications");
-
-  const element =
-    document.getElementById(
-      "notificationsList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucune notification.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    data.map(function (x) {
-
-      return (
-        "<div " +
-          "class='notification " +
-          (
-            Number(x.is_read)
-              ? ""
-              : "unread"
-          ) +
-          "' " +
-          "onclick='readNotification(" +
-          Number(x.id) +
-          ")'>" +
-
-          "<strong>" +
-            escapeHtml(x.title) +
-          "</strong>" +
-
-          "<p>" +
-            escapeHtml(x.message) +
-          "</p>" +
-
-          "<small>" +
-            escapeHtml(x.created_at) +
-          "</small>" +
-
-        "</div>"
-      );
-
-    }).join("");
-}
-
-
-/* =========================================================
-   MESSAGES
-========================================================= */
-
-async function loadMessages() {
-
-  const data =
-    await api("/api/messages");
-
-  const element =
-    document.getElementById(
-      "messagesList"
-    );
-
-  if (!data.length) {
-
-    element.innerHTML =
-      '<p class="empty">Aucun message automatique.</p>';
-
-    return;
-  }
-
-  element.innerHTML =
-    data.map(function (x) {
-
-      return (
-        "<div class='notification'>" +
-
-          "<strong>" +
-            escapeHtml(x.title) +
-          "</strong>" +
-
-          "<p>" +
-            escapeHtml(x.message) +
-          "</p>" +
-
-          "<small>" +
-            escapeHtml(x.created_at) +
-          "</small>" +
-
-        "</div>"
-      );
-
-    }).join("");
-}
-
-
-/* =========================================================
-   NOTIFICATION ACTIONS
-========================================================= */
-
-async function readNotification(id) {
-
-  try {
-
-    await api(
-      "/api/notifications/" +
-      Number(id) +
-      "/read",
-      {
-        method: "POST"
+function Dashboard({
+  account,
+  onLogout
+}) {
+
+  const [page,setPage] =
+    useState("dashboard");
+
+  const [dashboard,setDashboard] =
+    useState(null);
+
+  const [properties,setProperties] =
+    useState([]);
+
+  const [owners,setOwners] =
+    useState([]);
+
+  const [tenants,setTenants] =
+    useState([]);
+
+  const [leases,setLeases] =
+    useState([]);
+
+  const [payments,setPayments] =
+    useState([]);
+
+  const [notifications,setNotifications] =
+    useState([]);
+
+  const [messages,setMessages] =
+    useState([]);
+
+  const [loading,setLoading] =
+    useState(true);
+
+  const [modal,setModal] =
+    useState(null);
+
+  const [error,setError] =
+    useState("");
+
+  const [selectedProperty,setSelectedProperty] =
+    useState("all");
+
+
+  async function refresh() {
+
+    try {
+
+      setLoading(true);
+
+      const [
+        dash,
+        props,
+        own,
+        ten,
+        lea,
+        pay,
+        notif,
+        msg
+      ] = await Promise.all([
+        api("/api/dashboard"),
+        api("/api/properties"),
+        api("/api/owners"),
+        api("/api/tenants"),
+        api("/api/leases"),
+        api("/api/payments"),
+        api("/api/notifications"),
+        api("/api/messages")
+      ]);
+
+      setDashboard(dash);
+      setProperties(props);
+      setOwners(own);
+      setTenants(ten);
+      setLeases(lea);
+      setPayments(pay);
+      setNotifications(notif);
+      setMessages(msg);
+
+    } catch (err) {
+
+      if (
+        err.message ===
+        "Vous devez être connecté."
+      ) {
+        onLogout();
+        return;
       }
-    );
 
-    await loadNotifications();
-    await loadDashboard();
+      setError(err.message);
 
-  } catch (error) {
+    } finally {
 
-    toast(error.message);
-
-  }
-}
-
-
-async function readAll() {
-
-  try {
-
-    await api(
-      "/api/notifications/read-all",
-      {
-        method: "POST"
-      }
-    );
-
-    await loadNotifications();
-    await loadDashboard();
-
-  } catch (error) {
-
-    toast(error.message);
-
-  }
-}
-
-
-/* =========================================================
-   PAYMENT ACTION
-========================================================= */
-
-async function markPaid(id) {
-
-  if (!confirm(
-    "Confirmer que ce loyer a été payé ?"
-  )) {
-    return;
+      setLoading(false);
+    }
   }
 
-  try {
 
-    await api(
-      "/api/payments/" +
-      Number(id) +
-      "/paid",
-      {
-        method: "POST"
-      }
-    );
+  useEffect(() => {
+    refresh();
+  }, []);
 
-    toast(
-      "Paiement enregistré."
-    );
 
-    await loadPayments();
-    await loadDashboard();
+  async function logout() {
 
-  } catch (error) {
-
-    toast(error.message);
-
+    try {
+      await api(
+        "/api/logout",
+        {
+          method:"POST"
+        }
+      );
+    } finally {
+      onLogout();
+    }
   }
-}
 
 
-/* =========================================================
-   OWNER OPTIONS
-========================================================= */
+  async function markPaid(id) {
 
-async function loadOwnerOptions() {
+    try {
 
-  const data =
-    await api("/api/owners");
-
-  const select =
-    document.getElementById(
-      "ownerSelect"
-    );
-
-  select.innerHTML =
-    '<option value="">Aucun</option>' +
-
-    data.map(function (x) {
-
-      return (
-        '<option value="' +
-        Number(x.id) +
-        '">' +
-        escapeHtml(x.name) +
-        "</option>"
+      await api(
+        "/api/payments/" +
+        Number(id) +
+        "/paid",
+        {
+          method:"POST"
+        }
       );
 
-    }).join("");
-}
+      await refresh();
 
-
-/* =========================================================
-   LEASE OPTIONS
-========================================================= */
-
-async function loadLeaseOptions() {
-
-  const properties =
-    await api("/api/properties");
-
-  const tenants =
-    await api("/api/tenants");
-
-  const propertySelect =
-    document.getElementById(
-      "leaseProperty"
-    );
-
-  const tenantSelect =
-    document.getElementById(
-      "leaseTenant"
-    );
-
-  const availableProperties =
-    properties.filter(function (x) {
-      return x.status !== "occupied";
-    });
-
-  propertySelect.innerHTML =
-    availableProperties.length
-      ? availableProperties.map(
-          function (x) {
-            return (
-              '<option value="' +
-              Number(x.id) +
-              '">' +
-              escapeHtml(
-                x.reference
-              ) +
-              " - " +
-              escapeHtml(
-                x.title
-              ) +
-              "</option>"
-            );
-          }
-        ).join("")
-      : '<option value="">Aucun bien disponible</option>';
-
-  tenantSelect.innerHTML =
-    tenants.length
-      ? tenants.map(
-          function (x) {
-            return (
-              '<option value="' +
-              Number(x.id) +
-              '">' +
-              escapeHtml(
-                x.first_name
-              ) +
-              " " +
-              escapeHtml(
-                x.last_name
-              ) +
-              "</option>"
-            );
-          }
-        ).join("")
-      : '<option value="">Aucun locataire</option>';
-}
-
-
-/* =========================================================
-   PAYMENT OPTIONS
-========================================================= */
-
-async function loadPaymentOptions() {
-
-  const leases =
-    await api("/api/leases");
-
-  const select =
-    document.getElementById(
-      "paymentLease"
-    );
-
-  const activeLeases =
-    leases.filter(function (x) {
-      return x.status === "active";
-    });
-
-  select.innerHTML =
-    activeLeases.length
-      ? activeLeases.map(
-          function (x) {
-            return (
-              '<option value="' +
-              Number(x.id) +
-              '">' +
-              escapeHtml(
-                x.reference
-              ) +
-              " - " +
-              escapeHtml(
-                x.first_name
-              ) +
-              " " +
-              escapeHtml(
-                x.last_name
-              ) +
-              "</option>"
-            );
-          }
-        ).join("")
-      : '<option value="">Aucun bail actif</option>';
-}
-
-
-/* =========================================================
-   MODALS
-========================================================= */
-
-function openModal(id) {
-
-  const modal =
-    document.getElementById(id);
-
-  if (!modal) {
-    return;
+    } catch (err) {
+      setError(err.message);
+    }
   }
 
-  modal.classList.add("show");
 
-  if (
-    id === "propertyModal"
-  ) {
+  async function readNotification(id) {
 
-    loadOwnerOptions()
-      .catch(function (error) {
-        toast(error.message);
-      });
-  }
+    try {
 
-  if (
-    id === "leaseModal"
-  ) {
-
-    loadLeaseOptions()
-      .catch(function (error) {
-        toast(error.message);
-      });
-  }
-
-  if (
-    id === "paymentModal"
-  ) {
-
-    loadPaymentOptions()
-      .catch(function (error) {
-        toast(error.message);
-      });
-  }
-}
-
-
-function closeModals() {
-
-  document
-    .querySelectorAll(".modal")
-    .forEach(function (modal) {
-      modal.classList.remove(
-        "show"
+      await api(
+        "/api/notifications/" +
+        Number(id) +
+        "/read",
+        {
+          method:"POST"
+        }
       );
-    });
+
+      await refresh();
+
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+
+  async function readAll() {
+
+    try {
+
+      await api(
+        "/api/notifications/read-all",
+        {
+          method:"POST"
+        }
+      );
+
+      await refresh();
+
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+
+  const filteredTenants =
+    selectedProperty === "all"
+      ? tenants
+      : tenants.filter(t =>
+          leases.some(l =>
+            l.tenant_id === t.id &&
+            l.property_id === Number(selectedProperty)
+          )
+        );
+
+
+  const pageTitles = {
+    dashboard:"Tableau de bord",
+    properties:"Biens",
+    owners:"Propriétaires",
+    tenants:"Locataires",
+    leases:"Baux",
+    payments:"Loyers",
+    notifications:"Notifications",
+    messages:"Messages"
+  };
+
+
+  const nav = [
+    ["dashboard","Tableau de bord",Home],
+    ["properties","Biens",Building2],
+    ["owners","Propriétaires",UserRound],
+    ["tenants","Locataires",Users],
+    ["leases","Baux",FileText],
+    ["payments","Loyers",Wallet],
+    ["notifications","Notifications",Bell],
+    ["messages","Messages",MessageCircle]
+  ];
+
+
+  return (
+
+    <div
+      className="min-h-screen"
+      style={{
+        backgroundColor:"#F2F4F3",
+        fontFamily:"Inter,sans-serif"
+      }}
+    >
+
+      <header
+        style={{backgroundColor:NAVY}}
+        className="text-white"
+      >
+
+        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center justify-between">
+
+          <div>
+
+            <div
+              className="font-semibold text-lg"
+              style={{
+                fontFamily:"Roboto Slab,serif"
+              }}
+            >
+              Immo<span style={{color:GOLD}}>flow</span>
+            </div>
+
+            <div className="text-xs text-stone-300">
+              {account?.agency_name ||
+               account?.name ||
+               "Mon agence"}
+            </div>
+
+          </div>
+
+          <button
+            onClick={logout}
+            className="text-xs flex items-center gap-1 text-stone-300 hover:text-white"
+          >
+            <LogOut size={14}/>
+            Déconnexion
+          </button>
+
+        </div>
+
+      </header>
+
+
+      <div className="max-w-6xl mx-auto px-4 sm:px-6">
+
+        <div className="flex flex-col lg:flex-row gap-6 py-6">
+
+          <aside className="lg:w-56 flex-shrink-0">
+
+            <div className="bg-white rounded-lg border border-stone-200 p-2 lg:sticky lg:top-6">
+
+              {nav.map(([id,label,Icon]) => (
+
+                <button
+                  key={id}
+                  onClick={() => setPage(id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded text-sm mb-1 text-left"
+                  style={
+                    page === id
+                      ? {
+                          backgroundColor:NAVY,
+                          color:"white"
+                        }
+                      : {
+                          color:NAVY
+                        }
+                  }
+                >
+                  <Icon size={16}/>
+
+                  <span>{label}</span>
+
+                  {id === "notifications" &&
+                    Number(dashboard?.unread || 0) > 0 && (
+                      <span
+                        className="ml-auto text-xs rounded-full px-2 py-0.5"
+                        style={{
+                          backgroundColor:RUST,
+                          color:"white"
+                        }}
+                      >
+                        {dashboard.unread}
+                      </span>
+                    )}
+
+                </button>
+
+              ))}
+
+            </div>
+
+          </aside>
+
+
+          <main className="flex-1 min-w-0">
+
+            <div className="flex items-center justify-between mb-6">
+
+              <div>
+
+                <h1
+                  className="text-2xl font-bold"
+                  style={{
+                    fontFamily:"Roboto Slab,serif",
+                    color:NAVY
+                  }}
+                >
+                  {pageTitles[page]}
+                </h1>
+
+                <p className="text-sm text-stone-500 mt-1">
+                  {account?.name || "Votre espace de gestion"}
+                </p>
+
+              </div>
+
+              <div className="text-xs text-stone-400">
+                Septembre 2026
+              </div>
+
+            </div>
+
+
+            {error && (
+              <div
+                className="mb-5 rounded border p-3 text-sm flex justify-between"
+                style={{
+                  borderColor:"#f0b4aa",
+                  backgroundColor:"#fff5f3",
+                  color:RUST
+                }}
+              >
+                <span>{error}</span>
+
+                <button
+                  onClick={() => setError("")}
+                >
+                  <X size={16}/>
+                </button>
+
+              </div>
+            )}
+
+
+            {loading && !dashboard ? (
+
+              <div className="bg-white rounded-lg border border-stone-200 p-10 text-center">
+                Chargement de votre espace...
+              </div>
+
+            ) : (
+
+              <>
+
+                {page === "dashboard" && (
+                  <DashboardHome
+                    dashboard={dashboard}
+                    properties={properties}
+                    tenants={tenants}
+                    payments={payments}
+                    setPage={setPage}
+                    selectedProperty={selectedProperty}
+                    setSelectedProperty={setSelectedProperty}
+                    onAddProperty={() => setModal("property")}
+                    onAddTenant={() => setModal("tenant")}
+                  />
+                )}
+
+
+                {page === "properties" && (
+                  <PropertiesPage
+                    properties={properties}
+                    onAdd={() => setModal("property")}
+                  />
+                )}
+
+
+                {page === "owners" && (
+                  <OwnersPage
+                    owners={owners}
+                    onAdd={() => setModal("owner")}
+                  />
+                )}
+
+
+                {page === "tenants" && (
+                  <TenantsPage
+                    tenants={tenants}
+                    onAdd={() => setModal("tenant")}
+                  />
+                )}
+
+
+                {page === "leases" && (
+                  <LeasesPage
+                    leases={leases}
+                    onAdd={() => setModal("lease")}
+                  />
+                )}
+
+
+                {page === "payments" && (
+                  <PaymentsPage
+                    payments={payments}
+                    onAdd={() => setModal("payment")}
+                    onPaid={markPaid}
+                  />
+                )}
+
+
+                {page === "notifications" && (
+                  <NotificationsPage
+                    notifications={notifications}
+                    onRead={readNotification}
+                    onReadAll={readAll}
+                  />
+                )}
+
+
+                {page === "messages" && (
+                  <MessagesPage
+                    messages={messages}
+                  />
+                )}
+
+              </>
+
+            )}
+
+          </main>
+
+        </div>
+
+      </div>
+
+
+      {modal && (
+        <Modal
+          type={modal}
+          owners={owners}
+          properties={properties}
+          tenants={tenants}
+          leases={leases}
+          onClose={() => setModal(null)}
+          onSuccess={async () => {
+            setModal(null);
+            await refresh();
+          }}
+        />
+      )}
+
+    </div>
+  );
 }
 
 
 /* =========================================================
-   ESCAPE HTML
+   DASHBOARD HOME
 ========================================================= */
 
-function escapeHtml(value) {
+function DashboardHome({
+  dashboard,
+  properties,
+  tenants,
+  payments,
+  setPage,
+  selectedProperty,
+  setSelectedProperty,
+  onAddProperty,
+  onAddTenant
+}) {
 
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+  const expected =
+    payments.reduce(
+      (sum,p) =>
+        p.status !== "paid"
+          ? sum + Number(p.amount || 0)
+          : sum,
+      0
+    );
+
+  const collected =
+    payments.reduce(
+      (sum,p) =>
+        p.status === "paid"
+          ? sum + Number(p.amount || 0)
+          : sum,
+      0
+    );
+
+  return (
+
+    <>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+
+        <StatCard
+          icon={Home}
+          label="Biens"
+          value={dashboard?.properties || 0}
+        />
+
+        <StatCard
+          icon={Users}
+          label="Locataires"
+          value={dashboard?.tenants || 0}
+        />
+
+        <StatCard
+          icon={TrendingUp}
+          label="Encaissé"
+          value={formatFCFA(collected)}
+          green
+        />
+
+        <StatCard
+          icon={AlertCircle}
+          label="Retards"
+          value={dashboard?.late || 0}
+          danger={Number(dashboard?.late || 0) > 0}
+        />
+
+      </div>
+
+
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+
+        <div className="flex flex-wrap gap-2">
+
+          <button
+            onClick={() => setSelectedProperty("all")}
+            className="px-3 py-1.5 rounded-full text-sm border"
+            style={
+              selectedProperty === "all"
+                ? {
+                    backgroundColor:NAVY,
+                    color:"white",
+                    borderColor:NAVY
+                  }
+                : {
+                    backgroundColor:"white",
+                    color:NAVY,
+                    borderColor:"#d6d3d1"
+                  }
+            }
+          >
+            Tous les biens
+          </button>
+
+          {properties.map(p => (
+
+            <button
+              key={p.id}
+              onClick={() =>
+                setSelectedProperty(String(p.id))
+              }
+              className="px-3 py-1.5 rounded-full text-sm border flex items-center gap-1.5"
+              style={
+                selectedProperty === String(p.id)
+                  ? {
+                      backgroundColor:NAVY,
+                      color:"white",
+                      borderColor:NAVY
+                    }
+                  : {
+                      backgroundColor:"white",
+                      color:NAVY,
+                      borderColor:"#d6d3d1"
+                    }
+              }
+            >
+              <MapPin size={12}/>
+              {p.title}
+            </button>
+
+          ))}
+
+        </div>
+
+
+        <div className="flex gap-2">
+
+          <button
+            onClick={onAddProperty}
+            className="px-3 py-1.5 rounded text-sm font-medium border flex items-center gap-1.5"
+            style={{
+              borderColor:NAVY,
+              color:NAVY
+            }}
+          >
+            <Plus size={14}/>
+            Ajouter un bien
+          </button>
+
+          <button
+            onClick={onAddTenant}
+            disabled={!properties.length}
+            className="px-3 py-1.5 rounded text-sm font-medium flex items-center gap-1.5 disabled:opacity-50"
+            style={{
+              backgroundColor:GOLD,
+              color:NAVY
+            }}
+          >
+            <Plus size={14}/>
+            Ajouter un locataire
+          </button>
+
+        </div>
+
+      </div>
+
+
+      <div className="bg-white rounded-lg border border-stone-200 overflow-hidden">
+
+        <div className="p-4 border-b border-stone-200 flex justify-between">
+
+          <div>
+
+            <h2
+              className="font-semibold"
+              style={{
+                color:NAVY,
+                fontFamily:"Roboto Slab,serif"
+              }}
+            >
+              Suivi des loyers
+            </h2>
+
+            <p className="text-xs text-stone-400 mt-1">
+              Vue d'ensemble de vos paiements
+            </p>
+
+          </div>
+
+          <button
+            onClick={() => setPage("payments")}
+            className="text-xs underline"
+            style={{color:NAVY}}
+          >
+            Voir les loyers
+          </button>
+
+        </div>
+
+
+        <div className="overflow-x-auto">
+
+          <table className="w-full text-sm">
+
+            <thead>
+
+              <tr
+                className="border-b border-stone-200"
+                style={{backgroundColor:"#FAF9F7"}}
+              >
+
+                <th className="text-left py-3 px-4 text-xs text-stone-500">
+                  Locataire
+                </th>
+
+                <th className="text-left py-3 px-4 text-xs text-stone-500">
+                  Bien
+                </th>
+
+                <th className="text-left py-3 px-4 text-xs text-stone-500">
+                  Montant
+                </th>
+
+                <th className="text-left py-3 px-4 text-xs text-stone-500">
+                  Échéance
+                </th>
+
+                <th className="text-left py-3 px-4 text-xs text-stone-500">
+                  Statut
+                </th>
+
+              </tr>
+
+            </thead>
+
+            <tbody>
+
+              {payments.slice(0,10).map(p => (
+
+                <tr
+                  key={p.id}
+                  className="border-b border-stone-100"
+                >
+
+                  <td className="py-3 px-4">
+
+                    {p.first_name} {p.last_name}
+
+                  </td>
+
+                  <td className="py-3 px-4">
+                    {p.reference}
+                  </td>
+
+                  <td
+                    className="py-3 px-4"
+                    style={{
+                      fontFamily:"IBM Plex Mono,monospace"
+                    }}
+                  >
+                    {formatFCFA(p.amount)}
+                  </td>
+
+                  <td className="py-3 px-4">
+                    {p.due_date}
+                  </td>
+
+                  <td className="py-3 px-4">
+
+                    <StatusBadge
+                      status={p.status}
+                    />
+
+                  </td>
+
+                </tr>
+
+              ))}
+
+              {!payments.length && (
+
+                <tr>
+
+                  <td
+                    colSpan="5"
+                    className="text-center py-10 text-stone-400"
+                  >
+                    Aucun paiement enregistré.
+                  </td>
+
+                </tr>
+
+              )}
+
+            </tbody>
+
+          </table>
+
+        </div>
+
+      </div>
+
+
+      <div className="grid sm:grid-cols-2 gap-4 mt-5">
+
+        <div className="bg-white rounded-lg border border-stone-200 p-5">
+
+          <div className="text-xs text-stone-500 mb-2">
+            Total restant à encaisser
+          </div>
+
+          <div
+            className="text-xl font-semibold"
+            style={{
+              color:NAVY,
+              fontFamily:"IBM Plex Mono,monospace"
+            }}
+          >
+            {formatFCFA(expected)}
+          </div>
+
+        </div>
+
+
+        <div className="bg-white rounded-lg border border-stone-200 p-5">
+
+          <div className="text-xs text-stone-500 mb-2">
+            Biens occupés
+          </div>
+
+          <div
+            className="text-xl font-semibold"
+            style={{
+              color:GREEN,
+              fontFamily:"IBM Plex Mono,monospace"
+            }}
+          >
+            {dashboard?.occupied || 0}
+          </div>
+
+        </div>
+
+      </div>
+
+    </>
+  );
+}
+
+
+/* =========================================================
+   STAT CARD
+========================================================= */
+
+function StatCard({
+  icon:Icon,
+  label,
+  value,
+  green,
+  danger
+}) {
+
+  return (
+
+    <div className="bg-white rounded-lg p-4 border border-stone-200">
+
+      <div className="flex items-center gap-2 text-stone-500 text-xs mb-1">
+
+        <Icon size={14}/>
+
+        {label}
+
+      </div>
+
+      <div
+        className="text-xl sm:text-2xl font-semibold"
+        style={{
+          fontFamily:"IBM Plex Mono,monospace",
+          color:
+            danger
+              ? RUST
+              : green
+                ? GREEN
+                : NAVY
+        }}
+      >
+        {value}
+      </div>
+
+    </div>
+  );
 }
 
 
@@ -4616,458 +2994,1436 @@ function escapeHtml(value) {
    STATUS
 ========================================================= */
 
-function formatStatus(status) {
+function StatusBadge({status}) {
 
-  const values = {
-    available: "Disponible",
-    occupied: "Occupé",
-    active: "Actif",
-    ended: "Terminé",
-    pending: "En attente",
-    paid: "Payé",
-    late: "En retard"
+  const config = {
+    paid:{
+      label:"Payé",
+      bg:"#eaf3ee",
+      color:GREEN
+    },
+    late:{
+      label:"En retard",
+      bg:"#fff1ee",
+      color:RUST
+    },
+    pending:{
+      label:"En attente",
+      bg:"#faf5df",
+      color:"#8b7110"
+    },
+    active:{
+      label:"Actif",
+      bg:"#eaf3ee",
+      color:GREEN
+    },
+    available:{
+      label:"Disponible",
+      bg:"#eaf3ee",
+      color:GREEN
+    },
+    occupied:{
+      label:"Occupé",
+      bg:"#fff1ee",
+      color:RUST
+    }
   };
 
-  return values[status] ||
-    status ||
-    "—";
+  const c =
+    config[status] ||
+    {
+      label:status,
+      bg:"#f5f5f4",
+      color:"#57534e"
+    };
+
+  return (
+
+    <span
+      className="inline-block rounded-full px-2 py-1 text-xs font-medium"
+      style={{
+        backgroundColor:c.bg,
+        color:c.color
+      }}
+    >
+      {c.label}
+    </span>
+  );
 }
 
 
 /* =========================================================
-   REFRESH
+   PROPERTIES
 ========================================================= */
 
-async function refreshAll() {
+function PropertiesPage({
+  properties,
+  onAdd
+}) {
 
-  try {
+  return (
 
-    await Promise.all([
-      loadDashboard(),
-      loadProperties(),
-      loadOwners(),
-      loadTenants(),
-      loadLeases(),
-      loadPayments(),
-      loadNotifications(),
-      loadMessages()
-    ]);
+    <Section
+      title="Vos biens"
+      action="Ajouter un bien"
+      onAction={onAdd}
+    >
 
-  } catch (error) {
+      <div className="overflow-x-auto">
 
-    console.error(error);
+        <table className="w-full text-sm">
 
-    if (
-      error.message !==
-      "Vous devez être connecté."
-    ) {
-      toast(error.message);
+          <thead>
+
+            <tr className="border-b border-stone-200">
+
+              <th className="text-left py-3 px-3">
+                Référence
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Bien
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Ville
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Type
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Loyer
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Statut
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {properties.map(p => (
+
+              <tr
+                key={p.id}
+                className="border-b border-stone-100"
+              >
+
+                <td className="py-3 px-3">
+                  {p.reference}
+                </td>
+
+                <td className="py-3 px-3 font-medium">
+                  {p.title}
+                </td>
+
+                <td className="py-3 px-3">
+                  {p.city || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {p.type}
+                </td>
+
+                <td className="py-3 px-3">
+                  {formatFCFA(p.rent)}
+                </td>
+
+                <td className="py-3 px-3">
+                  <StatusBadge status={p.status}/>
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+        {!properties.length && (
+          <Empty text="Aucun bien enregistré."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   OWNERS
+========================================================= */
+
+function OwnersPage({
+  owners,
+  onAdd
+}) {
+
+  return (
+
+    <Section
+      title="Propriétaires"
+      action="Ajouter"
+      onAction={onAdd}
+    >
+
+      <div className="overflow-x-auto">
+
+        <table className="w-full text-sm">
+
+          <thead>
+
+            <tr className="border-b border-stone-200">
+
+              <th className="text-left py-3 px-3">
+                Nom
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Téléphone
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Email
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Adresse
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {owners.map(o => (
+
+              <tr
+                key={o.id}
+                className="border-b border-stone-100"
+              >
+
+                <td className="py-3 px-3 font-medium">
+                  {o.name}
+                </td>
+
+                <td className="py-3 px-3">
+                  {o.phone || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {o.email || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {o.address || "—"}
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+        {!owners.length && (
+          <Empty text="Aucun propriétaire enregistré."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   TENANTS
+========================================================= */
+
+function TenantsPage({
+  tenants,
+  onAdd
+}) {
+
+  return (
+
+    <Section
+      title="Locataires"
+      action="Ajouter"
+      onAction={onAdd}
+    >
+
+      <div className="overflow-x-auto">
+
+        <table className="w-full text-sm">
+
+          <thead>
+
+            <tr className="border-b border-stone-200">
+
+              <th className="text-left py-3 px-3">
+                Nom
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Téléphone
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Email
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Adresse
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {tenants.map(t => (
+
+              <tr
+                key={t.id}
+                className="border-b border-stone-100"
+              >
+
+                <td className="py-3 px-3 font-medium">
+                  {t.first_name} {t.last_name}
+                </td>
+
+                <td className="py-3 px-3">
+                  {t.phone || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {t.email || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {t.address || "—"}
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+        {!tenants.length && (
+          <Empty text="Aucun locataire enregistré."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   LEASES
+========================================================= */
+
+function LeasesPage({
+  leases,
+  onAdd
+}) {
+
+  return (
+
+    <Section
+      title="Baux"
+      action="Créer un bail"
+      onAction={onAdd}
+    >
+
+      <div className="overflow-x-auto">
+
+        <table className="w-full text-sm">
+
+          <thead>
+
+            <tr className="border-b border-stone-200">
+
+              <th className="text-left py-3 px-3">
+                Bien
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Locataire
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Début
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Fin
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Loyer
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Statut
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {leases.map(l => (
+
+              <tr
+                key={l.id}
+                className="border-b border-stone-100"
+              >
+
+                <td className="py-3 px-3">
+                  {l.reference} — {l.property_title}
+                </td>
+
+                <td className="py-3 px-3">
+                  {l.first_name} {l.last_name}
+                </td>
+
+                <td className="py-3 px-3">
+                  {l.start_date}
+                </td>
+
+                <td className="py-3 px-3">
+                  {l.end_date || "—"}
+                </td>
+
+                <td className="py-3 px-3">
+                  {formatFCFA(l.monthly_rent)}
+                </td>
+
+                <td className="py-3 px-3">
+                  <StatusBadge status={l.status}/>
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+        {!leases.length && (
+          <Empty text="Aucun bail enregistré."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   PAYMENTS
+========================================================= */
+
+function PaymentsPage({
+  payments,
+  onAdd,
+  onPaid
+}) {
+
+  return (
+
+    <Section
+      title="Loyers"
+      action="Ajouter un loyer"
+      onAction={onAdd}
+    >
+
+      <div className="overflow-x-auto">
+
+        <table className="w-full text-sm">
+
+          <thead>
+
+            <tr className="border-b border-stone-200">
+
+              <th className="text-left py-3 px-3">
+                Locataire
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Bien
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Montant
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Échéance
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Statut
+              </th>
+
+              <th className="text-left py-3 px-3">
+                Action
+              </th>
+
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            {payments.map(p => (
+
+              <tr
+                key={p.id}
+                className="border-b border-stone-100"
+              >
+
+                <td className="py-3 px-3">
+                  {p.first_name} {p.last_name}
+                </td>
+
+                <td className="py-3 px-3">
+                  {p.reference}
+                </td>
+
+                <td className="py-3 px-3">
+                  {formatFCFA(p.amount)}
+                </td>
+
+                <td className="py-3 px-3">
+                  {p.due_date}
+                </td>
+
+                <td className="py-3 px-3">
+                  <StatusBadge status={p.status}/>
+                </td>
+
+                <td className="py-3 px-3">
+
+                  {p.status !== "paid" ? (
+
+                    <button
+                      onClick={() => onPaid(p.id)}
+                      className="px-3 py-1.5 rounded text-xs font-medium text-white"
+                      style={{backgroundColor:NAVY}}
+                    >
+                      Marquer payé
+                    </button>
+
+                  ) : (
+
+                    <span
+                      className="text-xs"
+                      style={{color:GREEN}}
+                    >
+                      ✓ Enregistré
+                    </span>
+
+                  )}
+
+                </td>
+
+              </tr>
+
+            ))}
+
+          </tbody>
+
+        </table>
+
+        {!payments.length && (
+          <Empty text="Aucun loyer enregistré."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+
+function NotificationsPage({
+  notifications,
+  onRead,
+  onReadAll
+}) {
+
+  return (
+
+    <Section
+      title="Notifications"
+      action="Tout marquer comme lu"
+      onAction={onReadAll}
+    >
+
+      <div>
+
+        {notifications.map(n => (
+
+          <button
+            key={n.id}
+            onClick={() => onRead(n.id)}
+            className="w-full text-left p-4 border-b border-stone-100"
+            style={{
+              backgroundColor:
+                n.is_read
+                  ? "white"
+                  : "#f4f8ff"
+            }}
+          >
+
+            <div className="flex justify-between gap-4">
+
+              <div>
+
+                <strong
+                  style={{color:NAVY}}
+                >
+                  {n.title}
+                </strong>
+
+                <p className="text-sm text-stone-500 mt-1">
+                  {n.message}
+                </p>
+
+              </div>
+
+              {!n.is_read && (
+                <span
+                  className="text-xs rounded-full px-2 py-1 h-fit"
+                  style={{
+                    backgroundColor:NAVY,
+                    color:"white"
+                  }}
+                >
+                  Nouveau
+                </span>
+              )}
+
+            </div>
+
+            <small className="text-xs text-stone-400">
+              {n.created_at}
+            </small>
+
+          </button>
+
+        ))}
+
+        {!notifications.length && (
+          <Empty text="Aucune notification."/>
+        )}
+
+      </div>
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   MESSAGES
+========================================================= */
+
+function MessagesPage({
+  messages
+}) {
+
+  return (
+
+    <Section title="Messages">
+
+      {messages.map(m => (
+
+        <div
+          key={m.id}
+          className="p-4 border-b border-stone-100"
+        >
+
+          <strong style={{color:NAVY}}>
+            {m.title}
+          </strong>
+
+          <p className="text-sm text-stone-500 mt-1">
+            {m.message}
+          </p>
+
+          <small className="text-xs text-stone-400">
+            {m.created_at}
+          </small>
+
+        </div>
+
+      ))}
+
+      {!messages.length && (
+        <Empty text="Aucun message automatique."/>
+      )}
+
+    </Section>
+  );
+}
+
+
+/* =========================================================
+   SECTION
+========================================================= */
+
+function Section({
+  title,
+  action,
+  onAction,
+  children
+}) {
+
+  return (
+
+    <div className="bg-white rounded-lg border border-stone-200">
+
+      <div className="p-5 border-b border-stone-200 flex items-center justify-between gap-3">
+
+        <h2
+          className="font-semibold"
+          style={{
+            fontFamily:"Roboto Slab,serif",
+            color:NAVY
+          }}
+        >
+          {title}
+        </h2>
+
+        {action && (
+
+          <button
+            onClick={onAction}
+            className="px-3 py-1.5 rounded text-sm font-medium"
+            style={{
+              backgroundColor:NAVY,
+              color:"white"
+            }}
+          >
+            + {action}
+          </button>
+
+        )}
+
+      </div>
+
+      <div className="p-4">
+        {children}
+      </div>
+
+    </div>
+  );
+}
+
+
+/* =========================================================
+   EMPTY
+========================================================= */
+
+function Empty({text}) {
+
+  return (
+
+    <div className="py-10 text-center text-sm text-stone-400">
+      {text}
+    </div>
+  );
+}
+
+
+/* =========================================================
+   MODAL
+========================================================= */
+
+function Modal({
+  type,
+  owners,
+  properties,
+  tenants,
+  leases,
+  onClose,
+  onSuccess
+}) {
+
+  const [form,setForm] = useState({});
+  const [loading,setLoading] = useState(false);
+  const [error,setError] = useState("");
+
+
+  function change(name,value) {
+    setForm(prev => ({
+      ...prev,
+      [name]:value
+    }));
+  }
+
+
+  async function submit(e) {
+
+    e.preventDefault();
+
+    setError("");
+    setLoading(true);
+
+    try {
+
+      let endpoint = "";
+
+      if (type === "owner")
+        endpoint = "/api/owners";
+
+      if (type === "property")
+        endpoint = "/api/properties";
+
+      if (type === "tenant")
+        endpoint = "/api/tenants";
+
+      if (type === "lease")
+        endpoint = "/api/leases";
+
+      if (type === "payment")
+        endpoint = "/api/payments";
+
+
+      await api(
+        endpoint,
+        {
+          method:"POST",
+          body:JSON.stringify(form)
+        }
+      );
+
+      await onSuccess();
+
+    } catch (err) {
+
+      setError(err.message);
+
+    } finally {
+
+      setLoading(false);
     }
   }
+
+
+  const titles = {
+    owner:"Nouveau propriétaire",
+    property:"Nouveau bien",
+    tenant:"Nouveau locataire",
+    lease:"Nouveau bail",
+    payment:"Nouveau loyer"
+  };
+
+
+  return (
+
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4"
+      onClick={onClose}
+    >
+
+      <div
+        className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl max-h-[90vh] overflow-y-auto"
+        onClick={e => e.stopPropagation()}
+      >
+
+        <div className="flex justify-between items-center mb-5">
+
+          <h3
+            className="font-semibold text-lg"
+            style={{
+              fontFamily:"Roboto Slab,serif",
+              color:NAVY
+            }}
+          >
+            {titles[type]}
+          </h3>
+
+          <button
+            onClick={onClose}
+            className="text-stone-400"
+          >
+            <X size={20}/>
+          </button>
+
+        </div>
+
+
+        {error && (
+
+          <div
+            className="mb-4 rounded border p-3 text-sm"
+            style={{
+              borderColor:"#f0b4aa",
+              backgroundColor:"#fff5f3",
+              color:RUST
+            }}
+          >
+            {error}
+          </div>
+
+        )}
+
+
+        <form
+          onSubmit={submit}
+          className="space-y-3"
+        >
+
+          {type === "owner" && (
+            <>
+              <Input
+                label="Nom"
+                value={form.name}
+                onChange={v => change("name",v)}
+                required
+              />
+
+              <Input
+                label="Téléphone"
+                value={form.phone}
+                onChange={v => change("phone",v)}
+              />
+
+              <Input
+                label="Email"
+                type="email"
+                value={form.email}
+                onChange={v => change("email",v)}
+              />
+
+              <Input
+                label="Adresse"
+                value={form.address}
+                onChange={v => change("address",v)}
+              />
+            </>
+          )}
+
+
+          {type === "property" && (
+            <>
+              <Input
+                label="Référence"
+                value={form.reference}
+                onChange={v => change("reference",v)}
+                placeholder="IMM-001"
+                required
+              />
+
+              <Input
+                label="Nom du bien"
+                value={form.title}
+                onChange={v => change("title",v)}
+                placeholder="Résidence Fann"
+                required
+              />
+
+              <Select
+                label="Propriétaire"
+                value={form.owner_id || ""}
+                onChange={v => change("owner_id",v)}
+                options={[
+                  {
+                    value:"",
+                    label:"Aucun propriétaire"
+                  },
+                  ...owners.map(o => ({
+                    value:o.id,
+                    label:o.name
+                  }))
+                ]}
+              />
+
+              <Input
+                label="Adresse"
+                value={form.address}
+                onChange={v => change("address",v)}
+              />
+
+              <Input
+                label="Ville"
+                value={form.city}
+                onChange={v => change("city",v)}
+                placeholder="Dakar"
+              />
+
+              <Select
+                label="Type"
+                value={form.type || "Appartement"}
+                onChange={v => change("type",v)}
+                options={[
+                  "Appartement",
+                  "Villa",
+                  "Studio",
+                  "Local commercial"
+                ].map(x => ({
+                  value:x,
+                  label:x
+                }))}
+              />
+
+              <Input
+                label="Nombre de chambres"
+                type="number"
+                value={form.bedrooms || ""}
+                onChange={v => change("bedrooms",v)}
+              />
+
+              <Input
+                label="Loyer mensuel (FCFA)"
+                type="number"
+                value={form.rent || ""}
+                onChange={v => change("rent",v)}
+              />
+            </>
+          )}
+
+
+          {type === "tenant" && (
+            <>
+              <Input
+                label="Prénom"
+                value={form.first_name}
+                onChange={v => change("first_name",v)}
+                required
+              />
+
+              <Input
+                label="Nom"
+                value={form.last_name}
+                onChange={v => change("last_name",v)}
+                required
+              />
+
+              <Input
+                label="Téléphone"
+                value={form.phone}
+                onChange={v => change("phone",v)}
+              />
+
+              <Input
+                label="Email"
+                type="email"
+                value={form.email}
+                onChange={v => change("email",v)}
+              />
+
+              <Input
+                label="Adresse"
+                value={form.address}
+                onChange={v => change("address",v)}
+              />
+            </>
+          )}
+
+
+          {type === "lease" && (
+            <>
+              <Select
+                label="Bien"
+                value={form.property_id || ""}
+                onChange={v => change("property_id",v)}
+                options={[
+                  {
+                    value:"",
+                    label:"Sélectionner un bien"
+                  },
+                  ...properties
+                    .filter(p => p.status !== "occupied")
+                    .map(p => ({
+                      value:p.id,
+                      label:
+                        p.reference +
+                        " — " +
+                        p.title
+                    }))
+                ]}
+                required
+              />
+
+              <Select
+                label="Locataire"
+                value={form.tenant_id || ""}
+                onChange={v => change("tenant_id",v)}
+                options={[
+                  {
+                    value:"",
+                    label:"Sélectionner un locataire"
+                  },
+                  ...tenants.map(t => ({
+                    value:t.id,
+                    label:
+                      t.first_name +
+                      " " +
+                      t.last_name
+                  }))
+                ]}
+                required
+              />
+
+              <Input
+                label="Date de début"
+                type="date"
+                value={form.start_date}
+                onChange={v => change("start_date",v)}
+                required
+              />
+
+              <Input
+                label="Date de fin"
+                type="date"
+                value={form.end_date}
+                onChange={v => change("end_date",v)}
+              />
+
+              <Input
+                label="Loyer mensuel (FCFA)"
+                type="number"
+                value={form.monthly_rent || ""}
+                onChange={v => change("monthly_rent",v)}
+                required
+              />
+
+              <Input
+                label="Dépôt de garantie (FCFA)"
+                type="number"
+                value={form.deposit || ""}
+                onChange={v => change("deposit",v)}
+              />
+            </>
+          )}
+
+
+          {type === "payment" && (
+            <>
+              <Select
+                label="Bail"
+                value={form.lease_id || ""}
+                onChange={v => change("lease_id",v)}
+                options={[
+                  {
+                    value:"",
+                    label:"Sélectionner un bail"
+                  },
+                  ...leases
+                    .filter(l => l.status === "active")
+                    .map(l => ({
+                      value:l.id,
+                      label:
+                        l.reference +
+                        " — " +
+                        l.first_name +
+                        " " +
+                        l.last_name
+                    }))
+                ]}
+                required
+              />
+
+              <Input
+                label="Montant (FCFA)"
+                type="number"
+                value={form.amount || ""}
+                onChange={v => change("amount",v)}
+                required
+              />
+
+              <Input
+                label="Date d'échéance"
+                type="date"
+                value={form.due_date}
+                onChange={v => change("due_date",v)}
+                required
+              />
+
+              <Select
+                label="Mode de paiement"
+                value={form.payment_method || ""}
+                onChange={v => change("payment_method",v)}
+                options={[
+                  {
+                    value:"",
+                    label:"Non précisé"
+                  },
+                  {
+                    value:"Wave",
+                    label:"Wave"
+                  },
+                  {
+                    value:"Orange Money",
+                    label:"Orange Money"
+                  },
+                  {
+                    value:"Espèces",
+                    label:"Espèces"
+                  },
+                  {
+                    value:"Virement",
+                    label:"Virement"
+                  }
+                ]}
+              />
+            </>
+          )}
+
+
+          <div className="flex justify-end gap-2 pt-4">
+
+            <button
+              type="button"
+              onClick={onClose}
+              className="px-4 py-2 rounded text-sm"
+              style={{
+                backgroundColor:"#e7e5e4",
+                color:NAVY
+              }}
+            >
+              Annuler
+            </button>
+
+            <button
+              type="submit"
+              disabled={loading}
+              className="px-4 py-2 rounded text-sm font-medium text-white disabled:opacity-60"
+              style={{
+                backgroundColor:NAVY
+              }}
+            >
+              {loading
+                ? "Enregistrement..."
+                : "Enregistrer"}
+            </button>
+
+          </div>
+
+        </form>
+
+      </div>
+
+    </div>
+  );
 }
 
 
 /* =========================================================
-   LOGIN FORM
+   INPUT
 ========================================================= */
 
-document
-  .getElementById("loginForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
+function Input({
+  label,
+  value,
+  onChange,
+  type="text",
+  placeholder="",
+  required=false
+}) {
 
-      event.preventDefault();
+  return (
 
-      const email =
-        document
-          .getElementById(
-            "loginEmail"
-          )
-          .value
-          .trim();
+    <label className="block">
 
-      const password =
-        document
-          .getElementById(
-            "loginPassword"
-          )
-          .value;
+      <span className="block text-xs font-medium text-stone-600 mb-1">
+        {label}
+      </span>
 
-      try {
+      <input
+        type={type}
+        required={required}
+        value={value ?? ""}
+        placeholder={placeholder}
+        onChange={e => onChange(e.target.value)}
+        className="w-full border border-stone-300 rounded px-3 py-2 text-sm"
+      />
 
-        const data =
-          await api(
-            "/api/login",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                email: email,
-                password: password
-              })
-            }
+    </label>
+  );
+}
+
+
+/* =========================================================
+   SELECT
+========================================================= */
+
+function Select({
+  label,
+  value,
+  onChange,
+  options,
+  required=false
+}) {
+
+  return (
+
+    <label className="block">
+
+      <span className="block text-xs font-medium text-stone-600 mb-1">
+        {label}
+      </span>
+
+      <select
+        required={required}
+        value={value ?? ""}
+        onChange={e => onChange(e.target.value)}
+        className="w-full border border-stone-300 rounded px-3 py-2 text-sm bg-white"
+      >
+
+        {options.map((o,i) => {
+
+          const option =
+            typeof o === "string"
+              ? {
+                  value:o,
+                  label:o
+                }
+              : o;
+
+          return (
+            <option
+              key={i}
+              value={option.value}
+            >
+              {option.label}
+            </option>
           );
 
-        showApp(data.user);
+        })}
 
-        event.target.reset();
+      </select>
 
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
+    </label>
   );
+}
 
 
 /* =========================================================
-   REGISTER FORM
+   APP ROOT
 ========================================================= */
 
-document
-  .getElementById("registerForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
+function App() {
 
-      event.preventDefault();
+  const [view,setView] =
+    useState("landing");
 
-      const agency =
-        document
-          .getElementById("agency")
-          .value
-          .trim();
+  const [account,setAccount] =
+    useState(null);
 
-      const name =
-        document
-          .getElementById("name")
-          .value
-          .trim();
+  const [selectedPlan,setSelectedPlan] =
+    useState(null);
 
-      const email =
-        document
-          .getElementById("email")
-          .value
-          .trim();
 
-      const password =
-        document
-          .getElementById("password")
-          .value;
+  useEffect(() => {
 
-      try {
+    api("/api/me")
+      .then(data => {
 
-        const data =
-          await api(
-            "/api/register",
-            {
-              method: "POST",
-              body: JSON.stringify({
-                agency_name: agency,
-                name: name,
-                email: email,
-                password: password
-              })
-            }
-          );
-
-        showApp(data.user);
-
-        event.target.reset();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   OWNER FORM
-========================================================= */
-
-document
-  .getElementById("ownerForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
-
-      event.preventDefault();
-
-      const data =
-        Object.fromEntries(
-          new FormData(event.target)
-        );
-
-      try {
-
-        await api(
-          "/api/owners",
-          {
-            method: "POST",
-            body: JSON.stringify(data)
-          }
-        );
-
-        closeModals();
-
-        event.target.reset();
-
-        toast(
-          "Propriétaire ajouté."
-        );
-
-        await loadOwners();
-        await loadOwnerOptions();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   PROPERTY FORM
-========================================================= */
-
-document
-  .getElementById("propertyForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
-
-      event.preventDefault();
-
-      const data =
-        Object.fromEntries(
-          new FormData(event.target)
-        );
-
-      try {
-
-        await api(
-          "/api/properties",
-          {
-            method: "POST",
-            body: JSON.stringify(data)
-          }
-        );
-
-        closeModals();
-
-        event.target.reset();
-
-        toast(
-          "Bien ajouté."
-        );
-
-        await loadProperties();
-        await loadDashboard();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   TENANT FORM
-========================================================= */
-
-document
-  .getElementById("tenantForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
-
-      event.preventDefault();
-
-      const data =
-        Object.fromEntries(
-          new FormData(event.target)
-        );
-
-      try {
-
-        await api(
-          "/api/tenants",
-          {
-            method: "POST",
-            body: JSON.stringify(data)
-          }
-        );
-
-        closeModals();
-
-        event.target.reset();
-
-        toast(
-          "Locataire ajouté."
-        );
-
-        await loadTenants();
-        await loadDashboard();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   LEASE FORM
-========================================================= */
-
-document
-  .getElementById("leaseForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
-
-      event.preventDefault();
-
-      const data =
-        Object.fromEntries(
-          new FormData(event.target)
-        );
-
-      try {
-
-        await api(
-          "/api/leases",
-          {
-            method: "POST",
-            body: JSON.stringify(data)
-          }
-        );
-
-        closeModals();
-
-        event.target.reset();
-
-        toast(
-          "Bail créé."
-        );
-
-        await loadLeases();
-        await loadProperties();
-        await loadDashboard();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   PAYMENT FORM
-========================================================= */
-
-document
-  .getElementById("paymentForm")
-  .addEventListener(
-    "submit",
-    async function (event) {
-
-      event.preventDefault();
-
-      const data =
-        Object.fromEntries(
-          new FormData(event.target)
-        );
-
-      try {
-
-        await api(
-          "/api/payments",
-          {
-            method: "POST",
-            body: JSON.stringify(data)
-          }
-        );
-
-        closeModals();
-
-        event.target.reset();
-
-        toast(
-          "Loyer enregistré."
-        );
-
-        await loadPayments();
-        await loadDashboard();
-
-      } catch (error) {
-
-        toast(error.message);
-
-      }
-    }
-  );
-
-
-/* =========================================================
-   MODAL OUTSIDE CLICK
-========================================================= */
-
-document
-  .querySelectorAll(".modal")
-  .forEach(function (modal) {
-
-    modal.addEventListener(
-      "click",
-      function (event) {
-
-        if (
-          event.target === modal
-        ) {
-          modal.classList.remove(
-            "show"
-          );
+        if (data.user) {
+          setAccount(data.user);
+          setView("dashboard");
         }
 
-      }
-    );
+      })
+      .catch(() => {});
 
-  });
+  }, []);
 
 
-/* =========================================================
-   ESC KEY
-========================================================= */
+  function handleAuth(user) {
 
-document.addEventListener(
-  "keydown",
-  function (event) {
-
-    if (event.key === "Escape") {
-      closeModals();
-    }
-
+    setAccount(user);
+    setView("dashboard");
   }
-);
 
 
-/* =========================================================
-   START
-========================================================= */
+  function selectPlan(plan) {
 
-checkSession();
+    setSelectedPlan(plan);
+
+    setView("signup");
+  }
+
+
+  function logout() {
+
+    setAccount(null);
+    setSelectedPlan(null);
+    setView("landing");
+  }
+
+
+  if (view === "dashboard" && account) {
+
+    return (
+      <Dashboard
+        account={account}
+        onLogout={logout}
+      />
+    );
+  }
+
+
+  if (view === "login" || view === "signup") {
+
+    return (
+      <AuthPage
+        mode={view}
+        onSuccess={handleAuth}
+        onSwitch={setView}
+        onBack={() => setView("landing")}
+      />
+    );
+  }
+
+
+  return (
+    <Landing
+      onLogin={() => setView("login")}
+      onSignup={() => setView("signup")}
+      onSelectPlan={selectPlan}
+    />
+  );
+}
+
+
+const root =
+  document.getElementById("root");
+
+if (root) {
+  ReactDOM
+    .createRoot(root)
+    .render(<App />);
+}
 
 </script>
 
