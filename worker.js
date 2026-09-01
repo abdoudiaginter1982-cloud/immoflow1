@@ -1,3 +1,4 @@
+```javascript
 export default {
   async fetch(request, env) {
     try {
@@ -1393,24 +1394,41 @@ const lucide =
   window.LucideReact ||
   {};
 
+
+/* =========================================================
+   FALLBACK ICON
+========================================================= */
+
 const fallbackIcon = ({
   size = 18,
   ...props
 }) =>
   React.createElement(
-    "span",
+    "svg",
     {
-      style:{
-        display:"inline-flex",
-        width:size,
-        height:size,
-        alignItems:"center",
-        justifyContent:"center"
-      },
+      width:size,
+      height:size,
+      viewBox:"0 0 24 24",
+      fill:"none",
+      stroke:"currentColor",
+      strokeWidth:"2",
+      strokeLinecap:"round",
+      strokeLinejoin:"round",
       ...props
     },
-    "•"
+    React.createElement("circle", {
+      cx:"12",
+      cy:"12",
+      r:"8"
+    }),
+    React.createElement("path", {
+      d:"M12 8v8"
+    }),
+    React.createElement("path", {
+      d:"M8 12h8"
+    })
   );
+
 
 const Plus = lucide.Plus || fallbackIcon;
 const X = lucide.X || fallbackIcon;
@@ -2848,7 +2866,7 @@ function DashboardHome({
                   </td>
 
                   <td className="py-3 px-4">
-                    {p.reference}
+                    {p.reference || "Référence non renseignée"}
                   </td>
 
                   <td
@@ -2861,7 +2879,7 @@ function DashboardHome({
                   </td>
 
                   <td className="py-3 px-4">
-                    {p.due_date}
+                    {p.due_date || "Date non renseignée"}
                   </td>
 
                   <td className="py-3 px-4">
@@ -3032,7 +3050,7 @@ function StatusBadge({status}) {
   const c =
     config[status] ||
     {
-      label:status,
+      label:status || "Statut non renseigné",
       bg:"#f5f5f4",
       color:"#57534e"
     };
@@ -3115,19 +3133,19 @@ function PropertiesPage({
               >
 
                 <td className="py-3 px-3">
-                  {p.reference}
+                  {p.reference || "Référence non renseignée"}
                 </td>
 
                 <td className="py-3 px-3 font-medium">
-                  {p.title}
+                  {p.title || "Bien non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.city || "—"}
+                  {p.city || "Ville non renseignée"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.type}
+                  {p.type || "Type non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3212,19 +3230,19 @@ function OwnersPage({
               >
 
                 <td className="py-3 px-3 font-medium">
-                  {o.name}
+                  {o.name || "Nom non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.phone || "—"}
+                  {o.phone || "Téléphone non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.email || "—"}
+                  {o.email || "Email non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {o.address || "—"}
+                  {o.address || "Adresse non renseignée"}
                 </td>
 
               </tr>
@@ -3301,19 +3319,19 @@ function TenantsPage({
               >
 
                 <td className="py-3 px-3 font-medium">
-                  {t.first_name} {t.last_name}
+                  {t.first_name || "Prénom non renseigné"} {t.last_name || "Nom non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.phone || "—"}
+                  {t.phone || "Téléphone non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.email || "—"}
+                  {t.email || "Email non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {t.address || "—"}
+                  {t.address || "Adresse non renseignée"}
                 </td>
 
               </tr>
@@ -3398,19 +3416,19 @@ function LeasesPage({
               >
 
                 <td className="py-3 px-3">
-                  {l.reference} — {l.property_title}
+                  {l.reference || "Référence non renseignée"} — {l.property_title || "Bien non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.first_name} {l.last_name}
+                  {l.first_name || "Prénom non renseigné"} {l.last_name || "Nom non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.start_date}
+                  {l.start_date || "Date non renseignée"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {l.end_date || "—"}
+                  {l.end_date || "Date non renseignée"}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3504,11 +3522,11 @@ function PaymentsPage({
               >
 
                 <td className="py-3 px-3">
-                  {p.first_name} {p.last_name}
+                  {p.first_name || "Prénom non renseigné"} {p.last_name || "Nom non renseigné"}
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.reference}
+                  {p.reference || "Référence non renseignée"}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3516,7 +3534,7 @@ function PaymentsPage({
                 </td>
 
                 <td className="py-3 px-3">
-                  {p.due_date}
+                  {p.due_date || "Date non renseignée"}
                 </td>
 
                 <td className="py-3 px-3">
@@ -3608,11 +3626,11 @@ function NotificationsPage({
                 <strong
                   style={{color:NAVY}}
                 >
-                  {n.title}
+                  {n.title || "Notification sans titre"}
                 </strong>
 
                 <p className="text-sm text-stone-500 mt-1">
-                  {n.message}
+                  {n.message || "Message non renseigné"}
                 </p>
 
               </div>
@@ -3632,7 +3650,7 @@ function NotificationsPage({
             </div>
 
             <small className="text-xs text-stone-400">
-              {n.created_at}
+              {n.created_at || "Date non renseignée"}
             </small>
 
           </button>
@@ -3670,15 +3688,15 @@ function MessagesPage({
         >
 
           <strong style={{color:NAVY}}>
-            {m.title}
+            {m.title || "Message sans titre"}
           </strong>
 
           <p className="text-sm text-stone-500 mt-1">
-            {m.message}
+            {m.message || "Message non renseigné"}
           </p>
 
           <small className="text-xs text-stone-400">
-            {m.created_at}
+            {m.created_at || "Date non renseignée"}
           </small>
 
         </div>
@@ -4429,3 +4447,4 @@ if (root) {
 
 </body>
 </html>`;
+```
