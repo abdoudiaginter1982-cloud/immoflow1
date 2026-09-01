@@ -1,6 +1,13 @@
 export default {
   async fetch(request, env) {
     try {
+      if (!env.DB) {
+        return json({
+          error: "La base D1 n'est pas connectée.",
+          message: "Vérifiez que le binding D1 s'appelle DB."
+        }, 500);
+      }
+
       await initDatabase(env.DB);
 
       const url = new URL(request.url);
@@ -14,12 +21,15 @@ export default {
           "content-type": "text/html;charset=UTF-8"
         }
       });
+
     } catch (error) {
       console.error(error);
 
       return json({
         error: "Erreur serveur",
-        details: error.message
+        details: error instanceof Error
+          ? error.message
+          : String(error)
       }, 500);
     }
   }
@@ -58,9 +68,9 @@ async function initDatabase(db) {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
       name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      address TEXT,
+      phone TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      address TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -72,9 +82,9 @@ async function initDatabase(db) {
       owner_id INTEGER,
       reference TEXT NOT NULL,
       title TEXT NOT NULL,
-      address TEXT,
-      city TEXT,
-      type TEXT,
+      address TEXT DEFAULT '',
+      city TEXT DEFAULT '',
+      type TEXT DEFAULT 'Appartement',
       bedrooms INTEGER DEFAULT 0,
       rent INTEGER DEFAULT 0,
       status TEXT DEFAULT 'available',
@@ -88,9 +98,9 @@ async function initDatabase(db) {
       user_id INTEGER NOT NULL,
       first_name TEXT NOT NULL,
       last_name TEXT NOT NULL,
-      phone TEXT,
-      email TEXT,
-      address TEXT,
+      phone TEXT DEFAULT '',
+      email TEXT DEFAULT '',
+      address TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -119,7 +129,7 @@ async function initDatabase(db) {
       due_date TEXT NOT NULL,
       paid_date TEXT,
       status TEXT DEFAULT 'pending',
-      payment_method TEXT,
+      payment_method TEXT DEFAULT '',
       created_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
   `).run();
@@ -155,45 +165,61 @@ async function initDatabase(db) {
 ========================================================= */
 
 function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "content-type": "application/json;charset=UTF-8",
-      ...headers
+
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+        ...headers
+      }
     }
-  });
+  );
 }
 
 
 async function hashPassword(password) {
 
-  const data = new TextEncoder().encode(password);
+  const data =
+    new TextEncoder().encode(password);
 
-  const hash = await crypto.subtle.digest(
-    "SHA-256",
-    data
-  );
+  const hash =
+    await crypto.subtle.digest(
+      "SHA-256",
+      data
+    );
 
-  return [...new Uint8Array(hash)]
-    .map(x => x.toString(16).padStart(2, "0"))
+  return Array
+    .from(new Uint8Array(hash))
+    .map(
+      x => x.toString(16).padStart(2, "0")
+    )
     .join("");
 }
 
 
 function randomToken() {
-  return crypto.randomUUID() + crypto.randomUUID();
+
+  return (
+    crypto.randomUUID() +
+    crypto.randomUUID()
+  );
 }
 
 
 function getCookie(request, name) {
 
-  const cookies = request.headers.get("Cookie") || "";
+  const cookies =
+    request.headers.get("Cookie") || "";
 
-  const parts = cookies.split(";");
+  const parts =
+    cookies.split(";");
 
   for (const part of parts) {
 
-    const [key, ...rest] = part.trim().split("=");
+    const [key, ...rest] =
+      part.trim().split("=");
 
     if (key === name) {
       return rest.join("=");
@@ -206,62 +232,117 @@ function getCookie(request, name) {
 
 async function getUser(request, db) {
 
-  const token = getCookie(request, "immoflow_session");
+  const token =
+    getCookie(
+      request,
+      "immoflow_session"
+    );
 
   if (!token) {
     return null;
   }
 
-  const session = await db.prepare(`
-    SELECT
-      users.id,
-      users.agency_name,
-      users.name,
-      users.email
-    FROM sessions
-    JOIN users
-      ON users.id = sessions.user_id
-    WHERE sessions.token = ?
-      AND datetime(sessions.expires_at) > datetime('now')
-  `)
-  .bind(token)
-  .first();
+  const session =
+    await db.prepare(`
+      SELECT
+        users.id,
+        users.agency_name,
+        users.name,
+        users.email
+      FROM sessions
+      INNER JOIN users
+        ON users.id = sessions.user_id
+      WHERE sessions.token = ?
+        AND datetime(sessions.expires_at) > datetime('now')
+      LIMIT 1
+    `)
+    .bind(token)
+    .first();
 
   return session || null;
 }
 
 
 function today() {
-  return new Date().toISOString().slice(0, 10);
+
+  return new Date()
+    .toISOString()
+    .slice(0, 10);
+}
+
+
+function normalizeText(value) {
+
+  return String(value ?? "").trim();
+}
+
+
+function toInteger(value) {
+
+  const number =
+    Number(value);
+
+  if (!Number.isFinite(number)) {
+    return 0;
+  }
+
+  return Math.round(number);
 }
 
 
 /* =========================================================
-   API ROUTER
+   API
 ========================================================= */
 
 async function api(request, env, url) {
 
   const db = env.DB;
 
-  const path = url.pathname;
-  const method = request.method;
+  const path =
+    url.pathname;
+
+  const method =
+    request.method;
 
 
   /* =======================================================
      REGISTER
   ======================================================= */
 
-  if (path === "/api/register" && method === "POST") {
+  if (
+    path === "/api/register" &&
+    method === "POST"
+  ) {
 
-    const data = await request.json();
+    let data;
 
-    const agency = String(data.agency_name || "").trim();
-    const name = String(data.name || "").trim();
-    const email = String(data.email || "").trim().toLowerCase();
-    const password = String(data.password || "");
+    try {
+      data = await request.json();
+    } catch {
+      return json({
+        error: "Données invalides."
+      }, 400);
+    }
 
-    if (!agency || !name || !email || !password) {
+    const agency =
+      normalizeText(data.agency_name);
+
+    const name =
+      normalizeText(data.name);
+
+    const email =
+      normalizeText(data.email)
+        .toLowerCase();
+
+    const password =
+      String(data.password || "");
+
+    if (
+      !agency ||
+      !name ||
+      !email ||
+      !password
+    ) {
       return json({
         error: "Tous les champs sont obligatoires."
       }, 400);
@@ -269,51 +350,61 @@ async function api(request, env, url) {
 
     if (password.length < 6) {
       return json({
-        error: "Le mot de passe doit contenir au moins 6 caractères."
+        error:
+          "Le mot de passe doit contenir au moins 6 caractères."
       }, 400);
     }
 
-    const existing = await db.prepare(`
-      SELECT id
-      FROM users
-      WHERE email = ?
-    `)
-    .bind(email)
-    .first();
+    const existing =
+      await db.prepare(`
+        SELECT id
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+      `)
+      .bind(email)
+      .first();
 
     if (existing) {
       return json({
-        error: "Un compte existe déjà avec cet email."
+        error:
+          "Un compte existe déjà avec cet email."
       }, 409);
     }
 
-    const passwordHash = await hashPassword(password);
+    const passwordHash =
+      await hashPassword(password);
 
-    const result = await db.prepare(`
-      INSERT INTO users
-      (
-        agency_name,
+    const result =
+      await db.prepare(`
+        INSERT INTO users
+        (
+          agency_name,
+          name,
+          email,
+          password_hash
+        )
+        VALUES (?, ?, ?, ?)
+      `)
+      .bind(
+        agency,
         name,
         email,
-        password_hash
+        passwordHash
       )
-      VALUES (?, ?, ?, ?)
-    `)
-    .bind(
-      agency,
-      name,
-      email,
-      passwordHash
-    )
-    .run();
+      .run();
 
-    const userId = result.meta.last_row_id;
+    const userId =
+      result.meta.last_row_id;
 
-    const token = randomToken();
+    const token =
+      randomToken();
 
-    const expires = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const expires =
+      new Date(
+        Date.now() +
+        7 * 24 * 60 * 60 * 1000
+      ).toISOString();
 
     await db.prepare(`
       INSERT INTO sessions
@@ -339,18 +430,22 @@ async function api(request, env, url) {
       "system"
     );
 
-    return json({
-      success: true,
-      user: {
-        id: userId,
-        agency_name: agency,
-        name,
-        email
+    return json(
+      {
+        success: true,
+        user: {
+          id: userId,
+          agency_name: agency,
+          name,
+          email
+        }
+      },
+      201,
+      {
+        "Set-Cookie":
+          `immoflow_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
       }
-    }, 201, {
-      "Set-Cookie":
-        `immoflow_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
-    });
+    );
   }
 
 
@@ -358,43 +453,73 @@ async function api(request, env, url) {
      LOGIN
   ======================================================= */
 
-  if (path === "/api/login" && method === "POST") {
+  if (
+    path === "/api/login" &&
+    method === "POST"
+  ) {
 
-    const data = await request.json();
+    let data;
 
-    const email = String(data.email || "")
-      .trim()
-      .toLowerCase();
+    try {
+      data = await request.json();
+    } catch {
+      return json({
+        error: "Données invalides."
+      }, 400);
+    }
 
-    const password = String(data.password || "");
+    const email =
+      normalizeText(data.email)
+        .toLowerCase();
 
-    const user = await db.prepare(`
-      SELECT *
-      FROM users
-      WHERE email = ?
-    `)
-    .bind(email)
-    .first();
+    const password =
+      String(data.password || "");
+
+    if (!email || !password) {
+      return json({
+        error:
+          "Email et mot de passe obligatoires."
+      }, 400);
+    }
+
+    const user =
+      await db.prepare(`
+        SELECT *
+        FROM users
+        WHERE email = ?
+        LIMIT 1
+      `)
+      .bind(email)
+      .first();
 
     if (!user) {
       return json({
-        error: "Email ou mot de passe incorrect."
+        error:
+          "Email ou mot de passe incorrect."
       }, 401);
     }
 
-    const passwordHash = await hashPassword(password);
+    const passwordHash =
+      await hashPassword(password);
 
-    if (passwordHash !== user.password_hash) {
+    if (
+      passwordHash !==
+      user.password_hash
+    ) {
       return json({
-        error: "Email ou mot de passe incorrect."
+        error:
+          "Email ou mot de passe incorrect."
       }, 401);
     }
 
-    const token = randomToken();
+    const token =
+      randomToken();
 
-    const expires = new Date(
-      Date.now() + 7 * 24 * 60 * 60 * 1000
-    ).toISOString();
+    const expires =
+      new Date(
+        Date.now() +
+        7 * 24 * 60 * 60 * 1000
+      ).toISOString();
 
     await db.prepare(`
       INSERT INTO sessions
@@ -412,18 +537,22 @@ async function api(request, env, url) {
     )
     .run();
 
-    return json({
-      success: true,
-      user: {
-        id: user.id,
-        agency_name: user.agency_name,
-        name: user.name,
-        email: user.email
+    return json(
+      {
+        success: true,
+        user: {
+          id: user.id,
+          agency_name: user.agency_name,
+          name: user.name,
+          email: user.email
+        }
+      },
+      200,
+      {
+        "Set-Cookie":
+          `immoflow_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
       }
-    }, 200, {
-      "Set-Cookie":
-        `immoflow_session=${token}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
-    });
+    );
   }
 
 
@@ -431,9 +560,13 @@ async function api(request, env, url) {
      ME
   ======================================================= */
 
-  if (path === "/api/me") {
+  if (
+    path === "/api/me" &&
+    method === "GET"
+  ) {
 
-    const user = await getUser(request, db);
+    const user =
+      await getUser(request, db);
 
     return json({
       user: user || null
@@ -445,12 +578,16 @@ async function api(request, env, url) {
      LOGOUT
   ======================================================= */
 
-  if (path === "/api/logout" && method === "POST") {
+  if (
+    path === "/api/logout" &&
+    method === "POST"
+  ) {
 
-    const token = getCookie(
-      request,
-      "immoflow_session"
-    );
+    const token =
+      getCookie(
+        request,
+        "immoflow_session"
+      );
 
     if (token) {
 
@@ -462,85 +599,113 @@ async function api(request, env, url) {
       .run();
     }
 
-    return json({
-      success: true
-    }, 200, {
-      "Set-Cookie":
-        "immoflow_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
-    });
+    return json(
+      {
+        success: true
+      },
+      200,
+      {
+        "Set-Cookie":
+          "immoflow_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0"
+      }
+    );
   }
 
 
   /* =======================================================
-     AUTH REQUIRED
+     AUTH
   ======================================================= */
 
-  const user = await getUser(request, db);
+  const user =
+    await getUser(
+      request,
+      db
+    );
 
   if (!user) {
+
     return json({
-      error: "Vous devez être connecté."
+      error:
+        "Vous devez être connecté."
     }, 401);
   }
 
-  const uid = user.id;
+  const uid =
+    user.id;
 
 
   /* =======================================================
      DASHBOARD
   ======================================================= */
 
-  if (path === "/api/dashboard") {
+  if (
+    path === "/api/dashboard" &&
+    method === "GET"
+  ) {
 
-    const properties = await db.prepare(`
-      SELECT COUNT(*) count
-      FROM properties
-      WHERE user_id = ?
-    `)
-    .bind(uid)
-    .first();
+    const properties =
+      await db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM properties
+        WHERE user_id = ?
+      `)
+      .bind(uid)
+      .first();
 
-    const tenants = await db.prepare(`
-      SELECT COUNT(*) count
-      FROM tenants
-      WHERE user_id = ?
-    `)
-    .bind(uid)
-    .first();
+    const tenants =
+      await db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM tenants
+        WHERE user_id = ?
+      `)
+      .bind(uid)
+      .first();
 
-    const occupied = await db.prepare(`
-      SELECT COUNT(*) count
-      FROM properties
-      WHERE user_id = ?
-      AND status = 'occupied'
-    `)
-    .bind(uid)
-    .first();
+    const occupied =
+      await db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM properties
+        WHERE user_id = ?
+          AND status = 'occupied'
+      `)
+      .bind(uid)
+      .first();
 
-    const late = await db.prepare(`
-      SELECT COALESCE(SUM(amount),0) total
-      FROM payments
-      WHERE user_id = ?
-      AND status = 'late'
-    `)
-    .bind(uid)
-    .first();
+    const late =
+      await db.prepare(`
+        SELECT COALESCE(SUM(amount), 0) AS total
+        FROM payments
+        WHERE user_id = ?
+          AND status = 'late'
+      `)
+      .bind(uid)
+      .first();
 
-    const unread = await db.prepare(`
-      SELECT COUNT(*) count
-      FROM notifications
-      WHERE user_id = ?
-      AND is_read = 0
-    `)
-    .bind(uid)
-    .first();
+    const unread =
+      await db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM notifications
+        WHERE user_id = ?
+          AND is_read = 0
+      `)
+      .bind(uid)
+      .first();
 
     return json({
-      properties: properties.count,
-      tenants: tenants.count,
-      occupied: occupied.count,
-      late: late.total,
-      unread: unread.count
+      properties:
+        Number(properties?.count || 0),
+
+      tenants:
+        Number(tenants?.count || 0),
+
+      occupied:
+        Number(occupied?.count || 0),
+
+      late:
+        Number(late?.total || 0),
+
+      unread:
+        Number(unread?.count || 0)
     });
   }
 
@@ -553,47 +718,63 @@ async function api(request, env, url) {
 
     if (method === "GET") {
 
-      const result = await db.prepare(`
-        SELECT *
-        FROM owners
-        WHERE user_id = ?
-        ORDER BY id DESC
-      `)
-      .bind(uid)
-      .all();
+      const result =
+        await db.prepare(`
+          SELECT *
+          FROM owners
+          WHERE user_id = ?
+          ORDER BY id DESC
+        `)
+        .bind(uid)
+        .all();
 
-      return json(result.results);
+      return json(
+        result.results || []
+      );
     }
 
     if (method === "POST") {
 
-      const data = await request.json();
+      let data;
 
-      if (!data.name) {
+      try {
+        data = await request.json();
+      } catch {
         return json({
-          error: "Le nom est obligatoire."
+          error: "Données invalides."
         }, 400);
       }
 
-      const result = await db.prepare(`
-        INSERT INTO owners
-        (
-          user_id,
+      const name =
+        normalizeText(data.name);
+
+      if (!name) {
+        return json({
+          error:
+            "Le nom est obligatoire."
+        }, 400);
+      }
+
+      const result =
+        await db.prepare(`
+          INSERT INTO owners
+          (
+            user_id,
+            name,
+            phone,
+            email,
+            address
+          )
+          VALUES (?, ?, ?, ?, ?)
+        `)
+        .bind(
+          uid,
           name,
-          phone,
-          email,
-          address
+          normalizeText(data.phone),
+          normalizeText(data.email),
+          normalizeText(data.address)
         )
-        VALUES (?, ?, ?, ?, ?)
-      `)
-      .bind(
-        uid,
-        data.name,
-        data.phone || "",
-        data.email || "",
-        data.address || ""
-      )
-      .run();
+        .run();
 
       return json({
         success: true,
@@ -611,67 +792,120 @@ async function api(request, env, url) {
 
     if (method === "GET") {
 
-      const result = await db.prepare(`
-        SELECT
-          properties.*,
-          owners.name owner_name
-        FROM properties
-        LEFT JOIN owners
-          ON owners.id = properties.owner_id
-          AND owners.user_id = properties.user_id
-        WHERE properties.user_id = ?
-        ORDER BY properties.id DESC
-      `)
-      .bind(uid)
-      .all();
+      const result =
+        await db.prepare(`
+          SELECT
+            properties.*,
+            owners.name AS owner_name
+          FROM properties
+          LEFT JOIN owners
+            ON owners.id = properties.owner_id
+            AND owners.user_id = properties.user_id
+          WHERE properties.user_id = ?
+          ORDER BY properties.id DESC
+        `)
+        .bind(uid)
+        .all();
 
-      return json(result.results);
+      return json(
+        result.results || []
+      );
     }
 
     if (method === "POST") {
 
-      const data = await request.json();
+      let data;
 
-      if (!data.reference || !data.title) {
+      try {
+        data = await request.json();
+      } catch {
         return json({
-          error: "Référence et nom du bien obligatoires."
+          error: "Données invalides."
         }, 400);
       }
 
-      const result = await db.prepare(`
-        INSERT INTO properties
-        (
-          user_id,
-          owner_id,
+      const reference =
+        normalizeText(data.reference);
+
+      const title =
+        normalizeText(data.title);
+
+      if (!reference || !title) {
+        return json({
+          error:
+            "Référence et nom du bien obligatoires."
+        }, 400);
+      }
+
+      let ownerId = null;
+
+      if (
+        data.owner_id !== undefined &&
+        data.owner_id !== null &&
+        data.owner_id !== ""
+      ) {
+
+        ownerId =
+          toInteger(data.owner_id);
+
+        const owner =
+          await db.prepare(`
+            SELECT id
+            FROM owners
+            WHERE id = ?
+              AND user_id = ?
+            LIMIT 1
+          `)
+          .bind(
+            ownerId,
+            uid
+          )
+          .first();
+
+        if (!owner) {
+          return json({
+            error:
+              "Le propriétaire sélectionné est invalide."
+          }, 400);
+        }
+      }
+
+      const result =
+        await db.prepare(`
+          INSERT INTO properties
+          (
+            user_id,
+            owner_id,
+            reference,
+            title,
+            address,
+            city,
+            type,
+            bedrooms,
+            rent,
+            status
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
+        `)
+        .bind(
+          uid,
+          ownerId,
           reference,
           title,
-          address,
-          city,
-          type,
-          bedrooms,
-          rent,
-          status
+          normalizeText(data.address),
+          normalizeText(data.city),
+          normalizeText(data.type) ||
+            "Appartement",
+          toInteger(data.bedrooms),
+          toInteger(data.rent)
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'available')
-      `)
-      .bind(
-        uid,
-        data.owner_id ? Number(data.owner_id) : null,
-        data.reference,
-        data.title,
-        data.address || "",
-        data.city || "",
-        data.type || "Appartement",
-        Number(data.bedrooms || 0),
-        Number(data.rent || 0)
-      )
-      .run();
+        .run();
 
       await createNotification(
         db,
         uid,
         "Nouveau bien",
-        `${data.title} a été ajouté à votre portefeuille.`,
+        `${title} a été ajouté à votre portefeuille.`,
         "property"
       );
 
@@ -691,55 +925,74 @@ async function api(request, env, url) {
 
     if (method === "GET") {
 
-      const result = await db.prepare(`
-        SELECT *
-        FROM tenants
-        WHERE user_id = ?
-        ORDER BY id DESC
-      `)
-      .bind(uid)
-      .all();
+      const result =
+        await db.prepare(`
+          SELECT *
+          FROM tenants
+          WHERE user_id = ?
+          ORDER BY id DESC
+        `)
+        .bind(uid)
+        .all();
 
-      return json(result.results);
+      return json(
+        result.results || []
+      );
     }
 
     if (method === "POST") {
 
-      const data = await request.json();
+      let data;
 
-      if (!data.first_name || !data.last_name) {
+      try {
+        data = await request.json();
+      } catch {
         return json({
-          error: "Prénom et nom obligatoires."
+          error: "Données invalides."
         }, 400);
       }
 
-      const result = await db.prepare(`
-        INSERT INTO tenants
-        (
-          user_id,
-          first_name,
-          last_name,
-          phone,
-          email,
-          address
+      const firstName =
+        normalizeText(data.first_name);
+
+      const lastName =
+        normalizeText(data.last_name);
+
+      if (!firstName || !lastName) {
+        return json({
+          error:
+            "Prénom et nom obligatoires."
+        }, 400);
+      }
+
+      const result =
+        await db.prepare(`
+          INSERT INTO tenants
+          (
+            user_id,
+            first_name,
+            last_name,
+            phone,
+            email,
+            address
+          )
+          VALUES (?, ?, ?, ?, ?, ?)
+        `)
+        .bind(
+          uid,
+          firstName,
+          lastName,
+          normalizeText(data.phone),
+          normalizeText(data.email),
+          normalizeText(data.address)
         )
-        VALUES (?, ?, ?, ?, ?, ?)
-      `)
-      .bind(
-        uid,
-        data.first_name,
-        data.last_name,
-        data.phone || "",
-        data.email || "",
-        data.address || ""
-      )
-      .run();
+        .run();
 
       await createNotification(
         db,
         uid,
         "Nouveau locataire",
-        `${data.first_name} ${data.last_name} a été ajouté.`,
+        `${firstName} ${lastName} a été ajouté.`,
         "tenant"
       );
 
@@ -759,107 +1012,159 @@ async function api(request, env, url) {
 
     if (method === "GET") {
 
-      const result = await db.prepare(`
-        SELECT
-          leases.*,
-          properties.reference,
-          properties.title property_title,
-          tenants.first_name,
-          tenants.last_name
-        FROM leases
-        JOIN properties
-          ON properties.id = leases.property_id
-          AND properties.user_id = leases.user_id
-        JOIN tenants
-          ON tenants.id = leases.tenant_id
-          AND tenants.user_id = leases.user_id
-        WHERE leases.user_id = ?
-        ORDER BY leases.id DESC
-      `)
-      .bind(uid)
-      .all();
+      const result =
+        await db.prepare(`
+          SELECT
+            leases.*,
+            properties.reference,
+            properties.title AS property_title,
+            tenants.first_name,
+            tenants.last_name
+          FROM leases
+          INNER JOIN properties
+            ON properties.id = leases.property_id
+            AND properties.user_id = leases.user_id
+          INNER JOIN tenants
+            ON tenants.id = leases.tenant_id
+            AND tenants.user_id = leases.user_id
+          WHERE leases.user_id = ?
+          ORDER BY leases.id DESC
+        `)
+        .bind(uid)
+        .all();
 
-      return json(result.results);
+      return json(
+        result.results || []
+      );
     }
 
     if (method === "POST") {
 
-      const data = await request.json();
+      let data;
 
-      if (
-        !data.property_id ||
-        !data.tenant_id ||
-        !data.start_date ||
-        !data.monthly_rent
-      ) {
+      try {
+        data = await request.json();
+      } catch {
         return json({
-          error: "Informations du bail incomplètes."
+          error: "Données invalides."
         }, 400);
       }
 
-      const property = await db.prepare(`
-        SELECT id
-        FROM properties
-        WHERE id = ?
-        AND user_id = ?
-      `)
-      .bind(
-        Number(data.property_id),
-        uid
-      )
-      .first();
+      const propertyId =
+        toInteger(data.property_id);
 
-      const tenant = await db.prepare(`
-        SELECT id
-        FROM tenants
-        WHERE id = ?
-        AND user_id = ?
-      `)
-      .bind(
-        Number(data.tenant_id),
-        uid
-      )
-      .first();
+      const tenantId =
+        toInteger(data.tenant_id);
+
+      const startDate =
+        normalizeText(data.start_date);
+
+      const monthlyRent =
+        toInteger(data.monthly_rent);
+
+      if (
+        !propertyId ||
+        !tenantId ||
+        !startDate ||
+        monthlyRent <= 0
+      ) {
+        return json({
+          error:
+            "Informations du bail incomplètes."
+        }, 400);
+      }
+
+      const property =
+        await db.prepare(`
+          SELECT id
+          FROM properties
+          WHERE id = ?
+            AND user_id = ?
+          LIMIT 1
+        `)
+        .bind(
+          propertyId,
+          uid
+        )
+        .first();
+
+      const tenant =
+        await db.prepare(`
+          SELECT id
+          FROM tenants
+          WHERE id = ?
+            AND user_id = ?
+          LIMIT 1
+        `)
+        .bind(
+          tenantId,
+          uid
+        )
+        .first();
 
       if (!property || !tenant) {
         return json({
-          error: "Bien ou locataire invalide."
+          error:
+            "Bien ou locataire invalide."
         }, 400);
       }
 
-      const result = await db.prepare(`
-        INSERT INTO leases
-        (
-          user_id,
-          property_id,
-          tenant_id,
-          start_date,
-          end_date,
-          monthly_rent,
-          deposit,
-          status
+      const activeLease =
+        await db.prepare(`
+          SELECT id
+          FROM leases
+          WHERE property_id = ?
+            AND user_id = ?
+            AND status = 'active'
+          LIMIT 1
+        `)
+        .bind(
+          propertyId,
+          uid
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
-      `)
-      .bind(
-        uid,
-        Number(data.property_id),
-        Number(data.tenant_id),
-        data.start_date,
-        data.end_date || null,
-        Number(data.monthly_rent),
-        Number(data.deposit || 0)
-      )
-      .run();
+        .first();
+
+      if (activeLease) {
+        return json({
+          error:
+            "Ce bien possède déjà un bail actif."
+        }, 409);
+      }
+
+      const result =
+        await db.prepare(`
+          INSERT INTO leases
+          (
+            user_id,
+            property_id,
+            tenant_id,
+            start_date,
+            end_date,
+            monthly_rent,
+            deposit,
+            status
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, 'active')
+        `)
+        .bind(
+          uid,
+          propertyId,
+          tenantId,
+          startDate,
+          normalizeText(data.end_date) || null,
+          monthlyRent,
+          toInteger(data.deposit)
+        )
+        .run();
 
       await db.prepare(`
         UPDATE properties
         SET status = 'occupied'
         WHERE id = ?
-        AND user_id = ?
+          AND user_id = ?
       `)
       .bind(
-        Number(data.property_id),
+        propertyId,
         uid
       )
       .run();
@@ -878,8 +1183,6 @@ async function api(request, env, url) {
       }, 201);
     }
   }
-
-
   /* =======================================================
      PAYMENTS
   ======================================================= */
@@ -888,85 +1191,163 @@ async function api(request, env, url) {
 
     if (method === "GET") {
 
-      await updateLatePayments(db, uid);
+      await updateLatePayments(
+        db,
+        uid
+      );
 
-      const result = await db.prepare(`
-        SELECT
-          payments.*,
-          tenants.first_name,
-          tenants.last_name,
-          properties.reference
-        FROM payments
-        JOIN leases
-          ON leases.id = payments.lease_id
-          AND leases.user_id = payments.user_id
-        JOIN tenants
-          ON tenants.id = leases.tenant_id
-          AND tenants.user_id = payments.user_id
-        JOIN properties
-          ON properties.id = leases.property_id
-          AND properties.user_id = payments.user_id
-        WHERE payments.user_id = ?
-        ORDER BY payments.due_date DESC
-      `)
-      .bind(uid)
-      .all();
+      const result =
+        await db.prepare(`
+          SELECT
+            payments.*,
+            tenants.first_name,
+            tenants.last_name,
+            properties.reference,
+            properties.title AS property_title
+          FROM payments
+          INNER JOIN leases
+            ON leases.id = payments.lease_id
+            AND leases.user_id = payments.user_id
+          INNER JOIN tenants
+            ON tenants.id = leases.tenant_id
+            AND tenants.user_id = payments.user_id
+          INNER JOIN properties
+            ON properties.id = leases.property_id
+            AND properties.user_id = payments.user_id
+          WHERE payments.user_id = ?
+          ORDER BY payments.due_date DESC,
+                   payments.id DESC
+        `)
+        .bind(uid)
+        .all();
 
-      return json(result.results);
+      return json(
+        result.results || []
+      );
     }
+
 
     if (method === "POST") {
 
-      const data = await request.json();
+      let data;
 
-      if (
-        !data.lease_id ||
-        !data.amount ||
-        !data.due_date
-      ) {
+      try {
+        data = await request.json();
+      } catch {
         return json({
-          error: "Informations du loyer incomplètes."
+          error: "Données invalides."
         }, 400);
       }
 
-      const lease = await db.prepare(`
-        SELECT id
-        FROM leases
-        WHERE id = ?
-        AND user_id = ?
-      `)
-      .bind(
-        Number(data.lease_id),
-        uid
-      )
-      .first();
+      const leaseId =
+        toInteger(data.lease_id);
+
+      const amount =
+        toInteger(data.amount);
+
+      const dueDate =
+        normalizeText(data.due_date);
+
+      const paymentMethod =
+        normalizeText(
+          data.payment_method
+        );
+
+      if (
+        !leaseId ||
+        amount <= 0 ||
+        !dueDate
+      ) {
+        return json({
+          error:
+            "Informations du loyer incomplètes."
+        }, 400);
+      }
+
+      const lease =
+        await db.prepare(`
+          SELECT
+            leases.id,
+            leases.monthly_rent,
+            properties.reference,
+            tenants.first_name,
+            tenants.last_name
+          FROM leases
+          INNER JOIN properties
+            ON properties.id = leases.property_id
+            AND properties.user_id = leases.user_id
+          INNER JOIN tenants
+            ON tenants.id = leases.tenant_id
+            AND tenants.user_id = leases.user_id
+          WHERE leases.id = ?
+            AND leases.user_id = ?
+          LIMIT 1
+        `)
+        .bind(
+          leaseId,
+          uid
+        )
+        .first();
 
       if (!lease) {
         return json({
-          error: "Bail introuvable."
+          error:
+            "Bail introuvable."
         }, 404);
       }
 
-      const result = await db.prepare(`
-        INSERT INTO payments
-        (
-          user_id,
-          lease_id,
-          amount,
-          due_date,
-          status,
-          payment_method
+      const existing =
+        await db.prepare(`
+          SELECT id
+          FROM payments
+          WHERE lease_id = ?
+            AND user_id = ?
+            AND due_date = ?
+          LIMIT 1
+        `)
+        .bind(
+          leaseId,
+          uid,
+          dueDate
         )
-        VALUES (?, ?, ?, ?, 'pending', ?)
-      `)
-      .bind(
+        .first();
+
+      if (existing) {
+        return json({
+          error:
+            "Un paiement existe déjà pour cette échéance."
+        }, 409);
+      }
+
+      const result =
+        await db.prepare(`
+          INSERT INTO payments
+          (
+            user_id,
+            lease_id,
+            amount,
+            due_date,
+            status,
+            payment_method
+          )
+          VALUES (?, ?, ?, ?, 'pending', ?)
+        `)
+        .bind(
+          uid,
+          leaseId,
+          amount,
+          dueDate,
+          paymentMethod
+        )
+        .run();
+
+      await createNotification(
+        db,
         uid,
-        Number(data.lease_id),
-        Number(data.amount),
-        data.due_date,
-        data.payment_method || ""
-      )
-      .run();
+        "Nouveau loyer",
+        `Un loyer de ${amount.toLocaleString("fr-FR")} FCFA a été enregistré pour ${lease.reference}.`,
+        "payment"
+      );
 
       return json({
         success: true,
@@ -977,41 +1358,76 @@ async function api(request, env, url) {
 
 
   /* =======================================================
-     MARK PAYMENT PAID
+     MARK PAYMENT AS PAID
   ======================================================= */
 
   const paidMatch =
-    path.match(/^\/api\/payments\/(\d+)\/paid$/);
+    path.match(
+      /^\/api\/payments\/(\d+)\/paid$/
+    );
 
-  if (paidMatch && method === "POST") {
+  if (
+    paidMatch &&
+    method === "POST"
+  ) {
 
-    const paymentId = Number(paidMatch[1]);
+    const paymentId =
+      Number(paidMatch[1]);
 
-    const payment = await db.prepare(`
-      SELECT id
-      FROM payments
-      WHERE id = ?
-      AND user_id = ?
-    `)
-    .bind(
-      paymentId,
-      uid
-    )
-    .first();
+    if (!Number.isInteger(paymentId)) {
+      return json({
+        error:
+          "Identifiant de paiement invalide."
+      }, 400);
+    }
+
+    const payment =
+      await db.prepare(`
+        SELECT
+          payments.id,
+          payments.amount,
+          payments.status,
+          payments.lease_id
+        FROM payments
+        WHERE payments.id = ?
+          AND payments.user_id = ?
+        LIMIT 1
+      `)
+      .bind(
+        paymentId,
+        uid
+      )
+      .first();
 
     if (!payment) {
       return json({
-        error: "Paiement introuvable."
+        error:
+          "Paiement introuvable."
       }, 404);
+    }
+
+    if (payment.status === "paid") {
+      return json({
+        success: true,
+        message:
+          "Ce paiement est déjà enregistré comme payé."
+      });
     }
 
     await db.prepare(`
       UPDATE payments
       SET
         status = 'paid',
-        paid_date = ?
+        paid_date = ?,
+        payment_method =
+          CASE
+            WHEN payment_method IS NULL
+              OR payment_method = ''
+            THEN 'Espèces'
+            ELSE payment_method
+          END
       WHERE id = ?
-      AND user_id = ?
+        AND user_id = ?
     `)
     .bind(
       today(),
@@ -1024,7 +1440,7 @@ async function api(request, env, url) {
       db,
       uid,
       "Paiement enregistré",
-      "Le paiement du loyer a été enregistré.",
+      `Le paiement de ${Number(payment.amount || 0).toLocaleString("fr-FR")} FCFA a été enregistré.`,
       "payment"
     );
 
@@ -1038,37 +1454,60 @@ async function api(request, env, url) {
      NOTIFICATIONS
   ======================================================= */
 
-  if (path === "/api/notifications") {
+  if (
+    path === "/api/notifications" &&
+    method === "GET"
+  ) {
 
-    await updateLatePayments(db, uid);
+    await updateLatePayments(
+      db,
+      uid
+    );
 
-    const result = await db.prepare(`
-      SELECT *
-      FROM notifications
-      WHERE user_id = ?
-      ORDER BY id DESC
-      LIMIT 100
-    `)
-    .bind(uid)
-    .all();
+    const result =
+      await db.prepare(`
+        SELECT *
+        FROM notifications
+        WHERE user_id = ?
+        ORDER BY id DESC
+        LIMIT 100
+      `)
+      .bind(uid)
+      .all();
 
-    return json(result.results);
+    return json(
+      result.results || []
+    );
   }
 
 
-  const notificationMatch =
-    path.match(/^\/api\/notifications\/(\d+)\/read$/);
+  /* =======================================================
+     MARK NOTIFICATION AS READ
+  ======================================================= */
 
-  if (notificationMatch && method === "POST") {
+  const notificationMatch =
+    path.match(
+      /^\/api\/notifications\/(\d+)\/read$/
+    );
+
+  if (
+    notificationMatch &&
+    method === "POST"
+  ) {
+
+    const notificationId =
+      Number(
+        notificationMatch[1]
+      );
 
     await db.prepare(`
       UPDATE notifications
       SET is_read = 1
       WHERE id = ?
-      AND user_id = ?
+        AND user_id = ?
     `)
     .bind(
-      Number(notificationMatch[1]),
+      notificationId,
       uid
     )
     .run();
@@ -1078,6 +1517,10 @@ async function api(request, env, url) {
     });
   }
 
+
+  /* =======================================================
+     MARK ALL NOTIFICATIONS AS READ
+  ======================================================= */
 
   if (
     path === "/api/notifications/read-all" &&
@@ -1102,27 +1545,58 @@ async function api(request, env, url) {
      MESSAGES
   ======================================================= */
 
-  if (path === "/api/messages") {
+  if (
+    path === "/api/messages" &&
+    method === "GET"
+  ) {
 
-    const result = await db.prepare(`
-      SELECT
-        messages.*,
-        tenants.first_name,
-        tenants.last_name
-      FROM messages
-      LEFT JOIN tenants
-        ON tenants.id = messages.tenant_id
-        AND tenants.user_id = messages.user_id
-      WHERE messages.user_id = ?
-      ORDER BY messages.id DESC
-      LIMIT 100
-    `)
-    .bind(uid)
-    .all();
+    const result =
+      await db.prepare(`
+        SELECT
+          messages.*,
+          tenants.first_name,
+          tenants.last_name
+        FROM messages
+        LEFT JOIN tenants
+          ON tenants.id = messages.tenant_id
+          AND tenants.user_id = messages.user_id
+        WHERE messages.user_id = ?
+        ORDER BY messages.id DESC
+        LIMIT 100
+      `)
+      .bind(uid)
+      .all();
 
-    return json(result.results);
+    return json(
+      result.results || []
+    );
   }
 
+
+  /* =======================================================
+     DELETE SESSION / CLEAN EXPIRED SESSIONS
+  ======================================================= */
+
+  if (
+    path === "/api/session/cleanup" &&
+    method === "POST"
+  ) {
+
+    await db.prepare(`
+      DELETE FROM sessions
+      WHERE datetime(expires_at) <= datetime('now')
+    `)
+    .run();
+
+    return json({
+      success: true
+    });
+  }
+
+
+  /* =======================================================
+     LATE PAYMENTS
+  ======================================================= */
 
   return json({
     error: "Route inconnue."
@@ -1131,46 +1605,60 @@ async function api(request, env, url) {
 
 
 /* =========================================================
-   LATE PAYMENTS
+   UPDATE LATE PAYMENTS
 ========================================================= */
 
-async function updateLatePayments(db, userId) {
+async function updateLatePayments(
+  db,
+  userId
+) {
 
-  const date = today();
+  const currentDate =
+    today();
 
-  const late = await db.prepare(`
-    SELECT
-      payments.id,
-      tenants.first_name,
-      tenants.last_name,
-      properties.reference
-    FROM payments
-    JOIN leases
-      ON leases.id = payments.lease_id
-      AND leases.user_id = payments.user_id
-    JOIN tenants
-      ON tenants.id = leases.tenant_id
-      AND tenants.user_id = payments.user_id
-    JOIN properties
-      ON properties.id = leases.property_id
-      AND properties.user_id = payments.user_id
-    WHERE payments.user_id = ?
-    AND payments.status = 'pending'
-    AND payments.due_date < ?
-  `)
-  .bind(
-    userId,
-    date
-  )
-  .all();
+  const late =
+    await db.prepare(`
+      SELECT
+        payments.id,
+        payments.lease_id,
+        payments.amount,
+        payments.due_date,
+        tenants.id AS tenant_id,
+        tenants.first_name,
+        tenants.last_name,
+        properties.reference
+      FROM payments
+      INNER JOIN leases
+        ON leases.id = payments.lease_id
+        AND leases.user_id = payments.user_id
+      INNER JOIN tenants
+        ON tenants.id = leases.tenant_id
+        AND tenants.user_id = payments.user_id
+      INNER JOIN properties
+        ON properties.id = leases.property_id
+        AND properties.user_id = payments.user_id
+      WHERE payments.user_id = ?
+        AND payments.status = 'pending'
+        AND payments.due_date < ?
+    `)
+    .bind(
+      userId,
+      currentDate
+    )
+    .all();
 
-  for (const payment of late.results) {
+
+  for (
+    const payment
+    of (late.results || [])
+  ) {
 
     await db.prepare(`
       UPDATE payments
       SET status = 'late'
       WHERE id = ?
-      AND user_id = ?
+        AND user_id = ?
+        AND status = 'pending'
     `)
     .bind(
       payment.id,
@@ -1178,46 +1666,74 @@ async function updateLatePayments(db, userId) {
     )
     .run();
 
-    const existing = await db.prepare(`
-      SELECT id
-      FROM notifications
-      WHERE user_id = ?
-      AND type = 'late'
-      AND message LIKE ?
-    `)
-    .bind(
-      userId,
-      `%paiement ${payment.id}%`
-    )
-    .first();
 
-    if (!existing) {
+    const notificationMessage =
+      `Le loyer de ${payment.first_name} ${payment.last_name} pour ${payment.reference} est en retard. Référence paiement ${payment.id}.`;
+
+
+    const existingNotification =
+      await db.prepare(`
+        SELECT id
+        FROM notifications
+        WHERE user_id = ?
+          AND type = 'late'
+          AND message LIKE ?
+        LIMIT 1
+      `)
+      .bind(
+        userId,
+        `%Référence paiement ${payment.id}%`
+      )
+      .first();
+
+
+    if (!existingNotification) {
 
       await createNotification(
         db,
         userId,
         "Loyer en retard",
-        `Le loyer de ${payment.first_name} ${payment.last_name} pour ${payment.reference} est en retard. Référence paiement ${payment.id}.`,
+        notificationMessage,
         "late"
       );
 
-      await db.prepare(`
-        INSERT INTO messages
-        (
-          user_id,
-          tenant_id,
-          title,
-          message,
-          type
+
+      const existingMessage =
+        await db.prepare(`
+          SELECT id
+          FROM messages
+          WHERE user_id = ?
+            AND message LIKE ?
+          LIMIT 1
+        `)
+        .bind(
+          userId,
+          `%paiement ${payment.id}%`
         )
-        VALUES (?, NULL, ?, ?, 'automatic')
-      `)
-      .bind(
-        userId,
-        "Rappel de loyer",
-        `Le paiement ${payment.id} concernant ${payment.reference} est en retard.`
-      )
-      .run();
+        .first();
+
+
+      if (!existingMessage) {
+
+        await db.prepare(`
+          INSERT INTO messages
+          (
+            user_id,
+            tenant_id,
+            title,
+            message,
+            type
+          )
+          VALUES (?, ?, ?, ?, 'automatic')
+        `)
+        .bind(
+          userId,
+          payment.tenant_id,
+          "Rappel de loyer",
+          `Le paiement ${payment.id} concernant ${payment.reference} est en retard.`
+        )
+        .run();
+      }
     }
   }
 }
@@ -1241,9 +1757,10 @@ async function createNotification(
       user_id,
       title,
       message,
-      type
+      type,
+      is_read
     )
-    VALUES (?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, 0)
   `)
   .bind(
     userId,
@@ -1253,795 +1770,1657 @@ async function createNotification(
   )
   .run();
 }
+<!-- DASHBOARD -->
+
+<section id="dashboard" class="page active">
+
+  <div class="cards">
+
+    <div class="card">
+      <div class="card-title">Biens</div>
+      <div id="statProperties" class="card-value">0</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Locataires</div>
+      <div id="statTenants" class="card-value">0</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Biens occupés</div>
+      <div id="statOccupied" class="card-value">0</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Loyers en retard</div>
+      <div id="statLate" class="card-value">0 FCFA</div>
+    </div>
+
+  </div>
+
+  <div class="panel">
+
+    <div class="panel-head">
+      <h2>Bienvenue sur ImmoFlow</h2>
+    </div>
+
+    <p class="muted">
+      Gérez vos biens, propriétaires, locataires, baux et loyers
+      depuis un seul espace.
+    </p>
+
+  </div>
+
+</section>
+
+
+<!-- PROPERTIES -->
+
+<section id="properties" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Biens immobiliers</h2>
+
+      <button
+        class="primary"
+        onclick="openModal('propertyModal')"
+      >
+        + Ajouter un bien
+      </button>
+
+    </div>
+
+    <div id="propertiesList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- OWNERS -->
+
+<section id="owners" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Propriétaires</h2>
+
+      <button
+        class="primary"
+        onclick="openModal('ownerModal')"
+      >
+        + Ajouter
+      </button>
+
+    </div>
+
+    <div id="ownersList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- TENANTS -->
+
+<section id="tenants" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Locataires</h2>
+
+      <button
+        class="primary"
+        onclick="openModal('tenantModal')"
+      >
+        + Ajouter
+      </button>
+
+    </div>
+
+    <div id="tenantsList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- LEASES -->
+
+<section id="leases" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Baux</h2>
+
+      <button
+        class="primary"
+        onclick="openModal('leaseModal')"
+      >
+        + Créer un bail
+      </button>
+
+    </div>
+
+    <div id="leasesList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- PAYMENTS -->
+
+<section id="payments" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Loyers</h2>
+
+      <button
+        class="primary"
+        onclick="openModal('paymentModal')"
+      >
+        + Ajouter un loyer
+      </button>
+
+    </div>
+
+    <div id="paymentsList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- NOTIFICATIONS -->
+
+<section id="notifications" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Notifications</h2>
+
+      <button
+        class="secondary"
+        onclick="readAll()"
+      >
+        Tout marquer comme lu
+      </button>
+
+    </div>
+
+    <div id="notificationsList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+
+<!-- MESSAGES -->
+
+<section id="messages" class="page">
+
+  <div class="panel">
+
+    <div class="panel-head">
+
+      <h2>Messages automatiques</h2>
+
+    </div>
+
+    <div id="messagesList">
+      <p class="muted">Chargement...</p>
+    </div>
+
+  </div>
+
+</section>
+
+</main>
+
+</div>
+
+
+<!-- =====================================================
+     OWNER MODAL
+===================================================== -->
+
+<div id="ownerModal" class="modal">
+
+  <div class="modal-card">
+
+    <h2>Ajouter un propriétaire</h2>
+
+    <form id="ownerForm">
+
+      <div class="field">
+
+        <label>Nom complet</label>
+
+        <input
+          name="name"
+          type="text"
+          required
+        >
+
+      </div>
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Téléphone</label>
+
+          <input
+            name="phone"
+            type="tel"
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Email</label>
+
+          <input
+            name="email"
+            type="email"
+          >
+
+        </div>
+
+      </div>
+
+      <div class="field">
+
+        <label>Adresse</label>
+
+        <input
+          name="address"
+          type="text"
+        >
+
+      </div>
+
+      <div class="actions">
+
+        <button
+          type="button"
+          class="secondary"
+          onclick="closeModals()"
+        >
+          Annuler
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          Enregistrer
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+<!-- =====================================================
+     PROPERTY MODAL
+===================================================== -->
+
+<div id="propertyModal" class="modal">
+
+  <div class="modal-card">
+
+    <h2>Ajouter un bien</h2>
+
+    <form id="propertyForm">
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Référence</label>
+
+          <input
+            name="reference"
+            type="text"
+            placeholder="IMM-001"
+            required
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Type</label>
+
+          <select name="type">
+
+            <option value="Appartement">
+              Appartement
+            </option>
+
+            <option value="Maison">
+              Maison
+            </option>
+
+            <option value="Villa">
+              Villa
+            </option>
+
+            <option value="Studio">
+              Studio
+            </option>
+
+            <option value="Bureau">
+              Bureau
+            </option>
+
+            <option value="Local commercial">
+              Local commercial
+            </option>
+
+            <option value="Terrain">
+              Terrain
+            </option>
+
+          </select>
+
+        </div>
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Nom du bien</label>
+
+        <input
+          name="title"
+          type="text"
+          placeholder="Appartement F3 Almadies"
+          required
+        >
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Propriétaire</label>
+
+          <select
+            id="ownerSelect"
+            name="owner_id"
+          >
+            <option value="">
+              Aucun
+            </option>
+          </select>
+
+        </div>
+
+        <div class="field">
+
+          <label>Ville</label>
+
+          <input
+            name="city"
+            type="text"
+            placeholder="Dakar"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Adresse</label>
+
+        <input
+          name="address"
+          type="text"
+        >
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Chambres</label>
+
+          <input
+            name="bedrooms"
+            type="number"
+            min="0"
+            value="0"
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Loyer mensuel</label>
+
+          <input
+            name="rent"
+            type="number"
+            min="0"
+            value="0"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="actions">
+
+        <button
+          type="button"
+          class="secondary"
+          onclick="closeModals()"
+        >
+          Annuler
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          Ajouter le bien
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+<!-- =====================================================
+     TENANT MODAL
+===================================================== -->
+
+<div id="tenantModal" class="modal">
+
+  <div class="modal-card">
+
+    <h2>Ajouter un locataire</h2>
+
+    <form id="tenantForm">
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Prénom</label>
+
+          <input
+            name="first_name"
+            type="text"
+            required
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Nom</label>
+
+          <input
+            name="last_name"
+            type="text"
+            required
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Téléphone</label>
+
+          <input
+            name="phone"
+            type="tel"
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Email</label>
+
+          <input
+            name="email"
+            type="email"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Adresse</label>
+
+        <input
+          name="address"
+          type="text"
+        >
+
+      </div>
+
+
+      <div class="actions">
+
+        <button
+          type="button"
+          class="secondary"
+          onclick="closeModals()"
+        >
+          Annuler
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          Ajouter
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+<!-- =====================================================
+     LEASE MODAL
+===================================================== -->
+
+<div id="leaseModal" class="modal">
+
+  <div class="modal-card">
+
+    <h2>Créer un bail</h2>
+
+    <form id="leaseForm">
+
+      <div class="field">
+
+        <label>Bien</label>
+
+        <select
+          id="leaseProperty"
+          name="property_id"
+          required
+        >
+          <option value="">
+            Chargement...
+          </option>
+        </select>
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Locataire</label>
+
+        <select
+          id="leaseTenant"
+          name="tenant_id"
+          required
+        >
+          <option value="">
+            Chargement...
+          </option>
+        </select>
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Date de début</label>
+
+          <input
+            name="start_date"
+            type="date"
+            required
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Date de fin</label>
+
+          <input
+            name="end_date"
+            type="date"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Loyer mensuel</label>
+
+          <input
+            name="monthly_rent"
+            type="number"
+            min="1"
+            required
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Caution</label>
+
+          <input
+            name="deposit"
+            type="number"
+            min="0"
+            value="0"
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="actions">
+
+        <button
+          type="button"
+          class="secondary"
+          onclick="closeModals()"
+        >
+          Annuler
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          Créer le bail
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+<!-- =====================================================
+     PAYMENT MODAL
+===================================================== -->
+
+<div id="paymentModal" class="modal">
+
+  <div class="modal-card">
+
+    <h2>Ajouter un loyer</h2>
+
+    <form id="paymentForm">
+
+      <div class="field">
+
+        <label>Bail</label>
+
+        <select
+          id="paymentLease"
+          name="lease_id"
+          required
+        >
+          <option value="">
+            Chargement...
+          </option>
+        </select>
+
+      </div>
+
+
+      <div class="grid">
+
+        <div class="field">
+
+          <label>Montant</label>
+
+          <input
+            name="amount"
+            type="number"
+            min="1"
+            required
+          >
+
+        </div>
+
+        <div class="field">
+
+          <label>Date d'échéance</label>
+
+          <input
+            name="due_date"
+            type="date"
+            required
+          >
+
+        </div>
+
+      </div>
+
+
+      <div class="field">
+
+        <label>Moyen de paiement</label>
+
+        <select name="payment_method">
+
+          <option value="">
+            Non précisé
+          </option>
+
+          <option value="Wave">
+            Wave
+          </option>
+
+          <option value="Orange Money">
+            Orange Money
+          </option>
+
+          <option value="Espèces">
+            Espèces
+          </option>
+
+          <option value="Virement">
+            Virement bancaire
+          </option>
+
+          <option value="Chèque">
+            Chèque
+          </option>
+
+        </select>
+
+      </div>
+
+
+      <div class="actions">
+
+        <button
+          type="button"
+          class="secondary"
+          onclick="closeModals()"
+        >
+          Annuler
+        </button>
+
+        <button
+          type="submit"
+          class="primary"
+        >
+          Enregistrer
+        </button>
+
+      </div>
+
+    </form>
+
+  </div>
+
+</div>
+
+
+<div id="toast" class="toast"></div>
+
+
+<script>
+
+/* =========================================================
+   API
+========================================================= */
+
+async function api(url, options = {}) {
+
+  const response = await fetch(url, {
+    credentials: "same-origin",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {})
+    }
+  });
+
+  let data;
+
+  try {
+    data = await response.json();
+  } catch {
+    data = {};
+  }
+
+  if (!response.ok) {
+
+    throw new Error(
+      data.error ||
+      data.details ||
+      "Une erreur est survenue."
+    );
+
+  }
+
+  return data;
+}
 
 
 /* =========================================================
-   FRONTEND
+   TOAST
 ========================================================= */
 
-const APP_HTML = `
+let toastTimer = null;
 
-<!DOCTYPE html>
+function toast(message) {
 
-<html lang="fr">
+  const element =
+    document.getElementById("toast");
 
-<head>
+  if (!element) {
+    return;
+  }
 
-<meta charset="UTF-8">
+  element.textContent = message;
+  element.style.display = "block";
 
-<meta
-name="viewport"
-content="width=device-width,initial-scale=1"
->
+  clearTimeout(toastTimer);
 
-<title>ImmoFlow</title>
-
-<style>
-
-*{
-box-sizing:border-box
+  toastTimer = setTimeout(() => {
+    element.style.display = "none";
+  }, 3000);
 }
 
-body{
-margin:0;
-font-family:Arial,sans-serif;
-background:#f4f6fa;
-color:#172033
+
+/* =========================================================
+   AUTH
+========================================================= */
+
+function showRegister() {
+
+  document
+    .getElementById("login")
+    .classList.add("hidden");
+
+  document
+    .getElementById("register")
+    .classList.remove("hidden");
 }
 
-button,
-input,
-select{
-font:inherit
+
+function showLogin() {
+
+  document
+    .getElementById("register")
+    .classList.add("hidden");
+
+  document
+    .getElementById("login")
+    .classList.remove("hidden");
 }
 
-button{
-cursor:pointer
-}
 
-.hidden{
-display:none!important
-}
+/* =========================================================
+   PAGE NAVIGATION
+========================================================= */
 
-.auth{
-min-height:100vh;
-display:flex;
-align-items:center;
-justify-content:center;
-padding:20px
-}
+const pageTitles = {
 
-.auth-card{
-width:100%;
-max-width:430px;
-background:white;
-padding:30px;
-border-radius:18px;
-box-shadow:0 10px 40px rgba(0,0,0,.08)
-}
+  dashboard: "Tableau de bord",
+  properties: "Biens immobiliers",
+  owners: "Propriétaires",
+  tenants: "Locataires",
+  leases: "Baux",
+  payments: "Loyers",
+  notifications: "Notifications",
+  messages: "Messages"
 
-.logo{
-font-size:30px;
-font-weight:800;
-margin-bottom:5px
-}
+};
 
-.logo span{
-color:#2563eb
-}
 
-.muted{
-color:#64748b
-}
+function page(name, button) {
 
-.field{
-margin-bottom:15px
-}
+  document
+    .querySelectorAll(".page")
+    .forEach(section => {
+      section.classList.remove("active");
+    });
 
-.field label{
-display:block;
-font-size:14px;
-font-weight:600;
-margin-bottom:6px
-}
+  const selected =
+    document.getElementById(name);
 
-.field input,
-.field select{
-width:100%;
-padding:12px;
-border:1px solid #d7dce5;
-border-radius:9px
-}
+  if (selected) {
+    selected.classList.add("active");
+  }
 
-.primary{
-background:#2563eb;
-border:0;
-color:white;
-padding:11px 16px;
-border-radius:9px;
-font-weight:700
-}
+  document
+    .querySelectorAll(".nav button")
+    .forEach(item => {
+      item.classList.remove("active");
+    });
 
-.secondary{
-background:#e5e7eb;
-border:0;
-padding:11px 16px;
-border-radius:9px
-}
+  if (button) {
+    button.classList.add("active");
+  }
 
-.full{
-width:100%
-}
+  document.getElementById("pageTitle").textContent =
+    pageTitles[name] || name;
 
-.auth-switch{
-text-align:center;
-margin-top:18px
-}
+  if (name === "dashboard") {
+    loadDashboard();
+  }
 
-.link{
-border:0;
-background:none;
-color:#2563eb;
-font-weight:700
-}
+  if (name === "properties") {
+    loadProperties();
+  }
 
-.app{
-display:flex;
-min-height:100vh
-}
+  if (name === "owners") {
+    loadOwners();
+  }
 
-.sidebar{
-width:240px;
-background:#111827;
-color:white;
-position:fixed;
-top:0;
-bottom:0;
-left:0;
-padding:20px
-}
+  if (name === "tenants") {
+    loadTenants();
+  }
 
-.side-logo{
-font-size:25px;
-font-weight:800;
-margin-bottom:30px
-}
+  if (name === "leases") {
+    loadLeases();
+  }
 
-.side-logo span{
-color:#60a5fa
-}
+  if (name === "payments") {
+    loadPayments();
+  }
 
-.nav button{
-display:block;
-width:100%;
-border:0;
-background:transparent;
-color:#cbd5e1;
-text-align:left;
-padding:13px;
-border-radius:8px;
-margin-bottom:5px
-}
+  if (name === "notifications") {
+    loadNotifications();
+  }
 
-.nav button:hover,
-.nav button.active{
-background:#1f2937;
-color:white
-}
-
-.logout{
-position:absolute;
-bottom:20px;
-left:20px;
-right:20px
-}
-
-.main{
-margin-left:240px;
-width:calc(100% - 240px);
-padding:25px
-}
-
-.top{
-display:flex;
-justify-content:space-between;
-align-items:center;
-margin-bottom:25px
-}
-
-.page{
-display:none
-}
-
-.page.active{
-display:block
-}
-
-.cards{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:15px
-}
-
-.card{
-background:white;
-padding:20px;
-border-radius:15px;
-box-shadow:0 3px 15px rgba(0,0,0,.05)
-}
-
-.card-title{
-color:#64748b;
-font-size:14px
-}
-
-.card-value{
-font-size:26px;
-font-weight:800;
-margin-top:8px
-}
-
-.panel{
-background:white;
-padding:20px;
-border-radius:15px;
-margin-top:20px;
-box-shadow:0 3px 15px rgba(0,0,0,.05)
-}
-
-.panel-head{
-display:flex;
-justify-content:space-between;
-align-items:center;
-margin-bottom:15px
-}
-
-table{
-width:100%;
-border-collapse:collapse
-}
-
-th,
-td{
-padding:12px 8px;
-border-bottom:1px solid #edf0f4;
-text-align:left
-}
-
-.badge{
-background:#ef4444;
-color:white;
-border-radius:20px;
-padding:3px 7px;
-font-size:11px
-}
-
-.notification{
-padding:15px;
-border-bottom:1px solid #eee
-}
-
-.unread{
-background:#eff6ff
-}
-
-.modal{
-display:none;
-position:fixed;
-inset:0;
-background:rgba(0,0,0,.5);
-align-items:center;
-justify-content:center;
-padding:20px;
-z-index:50
-}
-
-.modal.show{
-display:flex
-}
-
-.modal-card{
-background:white;
-width:min(600px,100%);
-padding:25px;
-border-radius:16px
-}
-
-.grid{
-display:grid;
-grid-template-columns:1fr 1fr;
-gap:12px
-}
-
-.actions{
-display:flex;
-justify-content:flex-end;
-gap:10px;
-margin-top:20px
-}
-
-.toast{
-position:fixed;
-right:20px;
-bottom:20px;
-background:#111827;
-color:white;
-padding:14px 18px;
-border-radius:10px;
-display:none;
-z-index:100
-}
-
-@media(max-width:800px){
-
-.sidebar{
-width:70px;
-padding:10px
-}
-
-.side-logo{
-font-size:0;
-text-align:center
-}
-
-.side-logo span{
-font-size:22px
-}
-
-.nav button{
-font-size:0;
-text-align:center
-}
-
-.logout{
-font-size:0;
-padding:10px
-}
-
-.main{
-margin-left:70px;
-width:calc(100% - 70px);
-padding:15px
-}
-
-.cards{
-grid-template-columns:1fr 1fr
-}
+  if (name === "messages") {
+    loadMessages();
+  }
 
 }
 
-@media(max-width:500px){
 
-.cards{
-grid-template-columns:1fr
+/* =========================================================
+   SESSION
+========================================================= */
+
+async function checkSession() {
+
+  try {
+
+    const data = await api("/api/me");
+
+    if (data.user) {
+
+      showApp(data.user);
+
+    } else {
+
+      showAuth();
+
+    }
+
+  } catch (error) {
+
+    console.error(error);
+
+    showAuth();
+
+  }
+
 }
 
-.grid{
-grid-template-columns:1fr
-}
+
+function showAuth() {
+
+  document
+    .getElementById("auth")
+    .classList.remove("hidden");
+
+  document
+    .getElementById("app")
+    .classList.add("hidden");
 
 }
 
-</style>
 
-</head>
+function showApp(user) {
 
-<body>
+  document
+    .getElementById("auth")
+    .classList.add("hidden");
 
+  document
+    .getElementById("app")
+    .classList.remove("hidden");
 
-<!-- AUTH -->
+  document.getElementById("agencyName").textContent =
+    `${user.agency_name} — ${user.name}`;
 
-<div id="auth" class="auth">
+  refreshAll();
 
-<div class="auth-card">
+}
 
-<div class="logo">
-Immo<span>Flow</span>
-</div>
 
-<p class="muted">
-Gestion immobilière pour agences
-</p>
+/* =========================================================
+   REGISTER FORM
+========================================================= */
 
+document
+  .getElementById("registerForm")
+  .addEventListener("submit", async event => {
 
-<div id="login">
+    event.preventDefault();
 
-<h2>Connexion</h2>
+    const data =
+      Object.fromEntries(
+        new FormData(event.target)
+      );
 
-<form id="loginForm">
+    try {
 
-<div class="field">
+      const result =
+        await api(
+          "/api/register",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              agency_name: data.agency_name,
+              name: data.name,
+              email: data.email,
+              password: data.password
+            })
+          }
+        );
 
-<label>Email</label>
+      toast("Compte créé avec succès.");
 
-<input
-id="loginEmail"
-type="email"
-required
->
+      showApp(result.user);
 
-</div>
+      event.target.reset();
 
-<div class="field">
+    } catch (error) {
 
-<label>Mot de passe</label>
+      toast(error.message);
 
-<input
-id="loginPassword"
-type="password"
-required
->
+    }
 
-</div>
+  });
 
-<button class="primary full">
-Se connecter
-</button>
 
-</form>
+/* =========================================================
+   LOGIN FORM
+========================================================= */
 
-<p class="auth-switch">
-Pas encore de compte ?
-<button
-class="link"
-onclick="showRegister()"
->
-Créer un compte
-</button>
-</p>
+document
+  .getElementById("loginForm")
+  .addEventListener("submit", async event => {
 
-</div>
+    event.preventDefault();
 
+    const email =
+      document.getElementById("loginEmail").value.trim();
 
-<div id="register" class="hidden">
+    const password =
+      document.getElementById("loginPassword").value;
 
-<h2>Créer votre compte</h2>
+    try {
 
-<form id="registerForm">
+      const result =
+        await api(
+          "/api/login",
+          {
+            method: "POST",
+            body: JSON.stringify({
+              email,
+              password
+            })
+          }
+        );
 
-<div class="field">
+      toast("Connexion réussie.");
 
-<label>Nom de l'agence</label>
+      showApp(result.user);
 
-<input
-id="agency"
-required
->
+      event.target.reset();
 
-</div>
+    } catch (error) {
 
-<div class="field">
+      toast(error.message);
 
-<label>Votre nom</label>
+    }
 
-<input
-id="name"
-required
->
+  });
 
-</div>
 
-<div class="field">
+/* =========================================================
+   LOGOUT
+========================================================= */
 
-<label>Email</label>
+async function logout() {
 
-<input
-id="email"
-type="email"
-required
->
+  try {
 
-</div>
+    await api(
+      "/api/logout",
+      {
+        method: "POST"
+      }
+    );
 
-<div class="field">
+    showAuth();
 
-<label>Mot de passe</label>
+    showLogin();
 
-<input
-id="password"
-type="password"
-minlength="6"
-required
->
+    toast("Vous êtes déconnecté.");
 
-</div>
+  } catch (error) {
 
-<button class="primary full">
-Créer mon compte
-</button>
+    toast(error.message);
 
-</form>
+  }
 
-<p class="auth-switch">
-Déjà inscrit ?
-<button
-class="link"
-onclick="showLogin()"
->
-Se connecter
-</button>
-</p>
+}
 
-</div>
 
-</div>
+/* =========================================================
+   DASHBOARD
+========================================================= */
 
-</div>
+async function loadDashboard() {
 
+  const data =
+    await api("/api/dashboard");
 
-<!-- APP -->
+  document.getElementById("statProperties").textContent =
+    Number(data.properties || 0).toLocaleString("fr-FR");
 
-<div id="app" class="app hidden">
+  document.getElementById("statTenants").textContent =
+    Number(data.tenants || 0).toLocaleString("fr-FR");
 
-<aside class="sidebar">
+  document.getElementById("statOccupied").textContent =
+    Number(data.occupied || 0).toLocaleString("fr-FR");
 
-<div class="side-logo">
-Immo<span>Flow</span>
-</div>
+  document.getElementById("statLate").textContent =
+    Number(data.late || 0).toLocaleString("fr-FR") +
+    " FCFA";
 
-<div class="nav">
+  document.getElementById("notificationBadge").textContent =
+    Number(data.unread || 0);
 
-<button
-class="active"
-onclick="page('dashboard',this)"
->
-🏠 Tableau de bord
-</button>
+}
 
-<button
-onclick="page('properties',this)"
->
-🏢 Biens
-</button>
 
-<button
-onclick="page('owners',this)"
->
-👔 Propriétaires
-</button>
+/* =========================================================
+   PROPERTIES
+========================================================= */
 
-<button
-onclick="page('tenants',this)"
->
-👤 Locataires
-</button>
+async function loadProperties() {
 
-<button
-onclick="page('leases',this)"
->
-📄 Baux
-</button>
+  const data =
+    await api("/api/properties");
 
-<button
-onclick="page('payments',this)"
->
-💰 Loyers
-</button>
+  document.getElementById("propertiesList").innerHTML =
+    data.length
+      ? `
+        <table>
 
-<button
-onclick="page('notifications',this)"
->
-🔔 Notifications
-<span id="notificationBadge" class="badge">0</span>
-</button>
+          <thead>
 
-<button
-onclick="page('messages',this)"
->
-💬 Messages
-</button>
-
-</div>
-
-<button
-class="secondary logout"
-onclick="logout()"
->
-Déconnexion
-</button>
-
-</aside>
-
-
-<main class="main">
-
-<div class="top">
-
-<div>
-
-<h1 id="pageTitle">
-Tableau de bord
-</h1>
-
-<div
-id="agencyName"
-class="muted"
-></div>
-
-</div>
-
-</div>
-async function loadOwners() {
-  const data = await api("/api/owners");
-
-  document.getElementById("ownersList").innerHTML = data.length
-    ? `
-      <table>
-        <thead>
-          <tr>
-            <th>Nom</th>
-            <th>Téléphone</th>
-            <th>Email</th>
-            <th>Adresse</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(x => `
             <tr>
-              <td>${escapeHtml(x.name)}</td>
-              <td>${escapeHtml(x.phone)}</td>
-              <td>${escapeHtml(x.email)}</td>
-              <td>${escapeHtml(x.address)}</td>
+              <th>Référence</th>
+              <th>Bien</th>
+              <th>Propriétaire</th>
+              <th>Ville</th>
+              <th>Type</th>
+              <th>Loyer</th>
+              <th>Statut</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `
-    : "<p>Aucun propriétaire.</p>";
+
+          </thead>
+
+          <tbody>
+
+            ${data.map(x => `
+
+              <tr>
+
+                <td>
+                  ${escapeHtml(x.reference)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.title)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.owner_name || "—")}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.city || "—")}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.type || "—")}
+                </td>
+
+                <td>
+                  ${Number(x.rent || 0)
+                    .toLocaleString("fr-FR")}
+                  FCFA
+                </td>
+
+                <td>
+                  ${escapeHtml(
+                    x.status === "occupied"
+                      ? "Occupé"
+                      : "Disponible"
+                  )}
+                </td>
+
+              </tr>
+
+            `).join("")}
+
+          </tbody>
+
+        </table>
+      `
+      : "<p>Aucun bien enregistré.</p>";
+
 }
 
+
+/* =========================================================
+   OWNERS
+========================================================= */
+
+async function loadOwners() {
+
+  const data =
+    await api("/api/owners");
+
+  document.getElementById("ownersList").innerHTML =
+    data.length
+      ? `
+
+        <table>
+
+          <thead>
+
+            <tr>
+              <th>Nom</th>
+              <th>Téléphone</th>
+              <th>Email</th>
+              <th>Adresse</th>
+            </tr>
+
+          </thead>
+
+          <tbody>
+
+            ${data.map(x => `
+
+              <tr>
+
+                <td>
+                  ${escapeHtml(x.name)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.phone)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.email)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.address)}
+                </td>
+
+              </tr>
+
+            `).join("")}
+
+          </tbody>
+
+        </table>
+
+      `
+      : "<p>Aucun propriétaire.</p>";
+
+}
+
+
+/* =========================================================
+   TENANTS
+========================================================= */
 
 async function loadTenants() {
-  const data = await api("/api/tenants");
 
-  document.getElementById("tenantsList").innerHTML = data.length
-    ? `
-      <table>
-        <thead>
-          <tr>
-            <th>Nom</th>
-            <th>Téléphone</th>
-            <th>Email</th>
-            <th>Adresse</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(x => `
+  const data =
+    await api("/api/tenants");
+
+  document.getElementById("tenantsList").innerHTML =
+    data.length
+      ? `
+
+        <table>
+
+          <thead>
+
             <tr>
-              <td>
-                ${escapeHtml(x.first_name)}
-                ${escapeHtml(x.last_name)}
-              </td>
-              <td>${escapeHtml(x.phone)}</td>
-              <td>${escapeHtml(x.email)}</td>
-              <td>${escapeHtml(x.address)}</td>
+              <th>Nom</th>
+              <th>Téléphone</th>
+              <th>Email</th>
+              <th>Adresse</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `
-    : "<p>Aucun locataire.</p>";
+
+          </thead>
+
+          <tbody>
+
+            ${data.map(x => `
+
+              <tr>
+
+                <td>
+                  ${escapeHtml(x.first_name)}
+                  ${escapeHtml(x.last_name)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.phone)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.email)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.address)}
+                </td>
+
+              </tr>
+
+            `).join("")}
+
+          </tbody>
+
+        </table>
+
+      `
+      : "<p>Aucun locataire.</p>";
+
 }
 
+
+/* =========================================================
+   LEASES
+========================================================= */
 
 async function loadLeases() {
-  const data = await api("/api/leases");
 
-  document.getElementById("leasesList").innerHTML = data.length
-    ? `
-      <table>
-        <thead>
-          <tr>
-            <th>Bien</th>
-            <th>Locataire</th>
-            <th>Début</th>
-            <th>Fin</th>
-            <th>Loyer</th>
-            <th>Statut</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${data.map(x => `
+  const data =
+    await api("/api/leases");
+
+  document.getElementById("leasesList").innerHTML =
+    data.length
+      ? `
+
+        <table>
+
+          <thead>
+
             <tr>
-              <td>
-                ${escapeHtml(x.reference)}
-                - ${escapeHtml(x.property_title)}
-              </td>
-
-              <td>
-                ${escapeHtml(x.first_name)}
-                ${escapeHtml(x.last_name)}
-              </td>
-
-              <td>${escapeHtml(x.start_date)}</td>
-              <td>${escapeHtml(x.end_date || "—")}</td>
-
-              <td>
-                ${Number(x.monthly_rent || 0)
-                  .toLocaleString("fr-FR")} FCFA
-              </td>
-
-              <td>${escapeHtml(x.status)}</td>
+              <th>Bien</th>
+              <th>Locataire</th>
+              <th>Début</th>
+              <th>Fin</th>
+              <th>Loyer</th>
+              <th>Statut</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `
-    : "<p>Aucun bail.</p>";
+
+          </thead>
+
+          <tbody>
+
+            ${data.map(x => `
+
+              <tr>
+
+                <td>
+                  ${escapeHtml(x.reference)}
+                  -
+                  ${escapeHtml(x.property_title)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.first_name)}
+                  ${escapeHtml(x.last_name)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.start_date)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.end_date || "—")}
+                </td>
+
+                <td>
+                  ${Number(x.monthly_rent || 0)
+                    .toLocaleString("fr-FR")}
+                  FCFA
+                </td>
+
+                <td>
+                  ${escapeHtml(
+                    x.status === "active"
+                      ? "Actif"
+                      : x.status
+                  )}
+                </td>
+
+              </tr>
+
+            `).join("")}
+
+          </tbody>
+
+        </table>
+
+      `
+      : "<p>Aucun bail.</p>";
+
 }
 
+
+/* =========================================================
+   PAYMENTS
+========================================================= */
 
 async function loadPayments() {
-  const data = await api("/api/payments");
 
-  document.getElementById("paymentsList").innerHTML = data.length
-    ? `
-      <table>
-        <thead>
-          <tr>
-            <th>Locataire</th>
-            <th>Bien</th>
-            <th>Montant</th>
-            <th>Échéance</th>
-            <th>Statut</th>
-            <th>Action</th>
-          </tr>
-        </thead>
+  const data =
+    await api("/api/payments");
 
-        <tbody>
-          ${data.map(x => `
+  document.getElementById("paymentsList").innerHTML =
+    data.length
+      ? `
+
+        <table>
+
+          <thead>
+
             <tr>
-              <td>
-                ${escapeHtml(x.first_name)}
-                ${escapeHtml(x.last_name)}
-              </td>
-
-              <td>${escapeHtml(x.reference)}</td>
-
-              <td>
-                ${Number(x.amount || 0)
-                  .toLocaleString("fr-FR")} FCFA
-              </td>
-
-              <td>${escapeHtml(x.due_date)}</td>
-
-              <td>
-                ${escapeHtml(x.status)}
-              </td>
-
-              <td>
-                ${
-                  x.status !== "paid"
-                    ? `
-                      <button
-                        class="primary"
-                        onclick="markPaid(${Number(x.id)})"
-                      >
-                        Payé
-                      </button>
-                    `
-                    : "✓"
-                }
-              </td>
+              <th>Locataire</th>
+              <th>Bien</th>
+              <th>Montant</th>
+              <th>Échéance</th>
+              <th>Statut</th>
+              <th>Action</th>
             </tr>
-          `).join("")}
-        </tbody>
-      </table>
-    `
-    : "<p>Aucun loyer.</p>";
+
+          </thead>
+
+          <tbody>
+
+            ${data.map(x => `
+
+              <tr>
+
+                <td>
+                  ${escapeHtml(x.first_name)}
+                  ${escapeHtml(x.last_name)}
+                </td>
+
+                <td>
+                  ${escapeHtml(x.reference)}
+                </td>
+
+                <td>
+                  ${Number(x.amount || 0)
+                    .toLocaleString("fr-FR")}
+                  FCFA
+                </td>
+
+                <td>
+                  ${escapeHtml(x.due_date)}
+                </td>
+
+                <td>
+                  ${escapeHtml(
+                    x.status === "paid"
+                      ? "Payé"
+                      : x.status === "late"
+                      ? "En retard"
+                      : "En attente"
+                  )}
+                </td>
+
+                <td>
+
+                  ${
+                    x.status !== "paid"
+                      ? `
+                        <button
+                          class="primary"
+                          onclick="markPaid(${Number(x.id)})"
+                        >
+                          Payé
+                        </button>
+                      `
+                      : "✓"
+                  }
+
+                </td>
+
+              </tr>
+
+            `).join("")}
+
+          </tbody>
+
+        </table>
+
+      `
+      : "<p>Aucun loyer enregistré.</p>";
+
 }
 
 
+/* =========================================================
+   NOTIFICATIONS
+========================================================= */
+
 async function loadNotifications() {
-  const data = await api("/api/notifications");
+
+  const data =
+    await api("/api/notifications");
 
   document.getElementById("notificationsList").innerHTML =
     data.length
       ? data.map(x => `
+
           <div
             class="notification ${x.is_read ? "" : "unread"}"
             onclick="readNotification(${Number(x.id)})"
           >
+
             <strong>
               ${escapeHtml(x.title)}
             </strong>
@@ -2053,19 +3432,30 @@ async function loadNotifications() {
             <small>
               ${escapeHtml(x.created_at)}
             </small>
+
           </div>
+
         `).join("")
       : "<p>Aucune notification.</p>";
+
 }
 
 
+/* =========================================================
+   MESSAGES
+========================================================= */
+
 async function loadMessages() {
-  const data = await api("/api/messages");
+
+  const data =
+    await api("/api/messages");
 
   document.getElementById("messagesList").innerHTML =
     data.length
       ? data.map(x => `
+
           <div class="notification">
+
             <strong>
               ${escapeHtml(x.title)}
             </strong>
@@ -2077,32 +3467,48 @@ async function loadMessages() {
             <small>
               ${escapeHtml(x.created_at)}
             </small>
+
           </div>
+
         `).join("")
       : "<p>Aucun message automatique.</p>";
+
 }
 
 
+/* =========================================================
+   NOTIFICATION ACTIONS
+========================================================= */
+
 async function readNotification(id) {
+
   try {
+
     await api(
-      "/api/notifications/" + Number(id) + "/read",
+      "/api/notifications/" +
+      Number(id) +
+      "/read",
       {
         method: "POST"
       }
     );
 
     await loadNotifications();
-    await refreshAll();
+    await loadDashboard();
 
   } catch (error) {
+
     toast(error.message);
+
   }
+
 }
 
 
 async function readAll() {
+
   try {
+
     await api(
       "/api/notifications/read-all",
       {
@@ -2111,18 +3517,31 @@ async function readAll() {
     );
 
     await loadNotifications();
-    await refreshAll();
+    await loadDashboard();
+
+    toast("Notifications marquées comme lues.");
 
   } catch (error) {
+
     toast(error.message);
+
   }
+
 }
 
 
+/* =========================================================
+   PAYMENT ACTION
+========================================================= */
+
 async function markPaid(id) {
+
   try {
+
     await api(
-      "/api/payments/" + Number(id) + "/paid",
+      "/api/payments/" +
+      Number(id) +
+      "/paid",
       {
         method: "POST"
       }
@@ -2131,31 +3550,45 @@ async function markPaid(id) {
     toast("Paiement enregistré.");
 
     await loadPayments();
-    await refreshAll();
+    await loadDashboard();
 
   } catch (error) {
+
     toast(error.message);
+
   }
+
 }
 
 
+/* =========================================================
+   SELECT OPTIONS
+========================================================= */
+
 async function loadOwnerOptions() {
-  const data = await api("/api/owners");
+
+  const data =
+    await api("/api/owners");
 
   const select =
     document.getElementById("ownerSelect");
 
   select.innerHTML =
     '<option value="">Aucun</option>' +
+
     data.map(x => `
+
       <option value="${Number(x.id)}">
         ${escapeHtml(x.name)}
       </option>
+
     `).join("");
+
 }
 
 
 async function loadLeaseOptions() {
+
   const properties =
     await api("/api/properties");
 
@@ -2168,60 +3601,84 @@ async function loadLeaseOptions() {
   const tenantSelect =
     document.getElementById("leaseTenant");
 
-  const availableProperties =
+  const available =
     properties.filter(
       x => x.status !== "occupied"
     );
 
   propertySelect.innerHTML =
-    availableProperties.length
-      ? availableProperties.map(x => `
+    available.length
+
+      ? available.map(x => `
+
           <option value="${Number(x.id)}">
             ${escapeHtml(x.reference)}
-            - ${escapeHtml(x.title)}
+            -
+            ${escapeHtml(x.title)}
           </option>
+
         `).join("")
+
       : '<option value="">Aucun bien disponible</option>';
+
 
   tenantSelect.innerHTML =
     tenants.length
+
       ? tenants.map(x => `
+
           <option value="${Number(x.id)}">
             ${escapeHtml(x.first_name)}
             ${escapeHtml(x.last_name)}
           </option>
+
         `).join("")
+
       : '<option value="">Aucun locataire</option>';
+
 }
 
 
 async function loadPaymentOptions() {
+
   const leases =
     await api("/api/leases");
 
   const select =
     document.getElementById("paymentLease");
 
-  const activeLeases =
+  const active =
     leases.filter(
       x => x.status === "active"
     );
 
   select.innerHTML =
-    activeLeases.length
-      ? activeLeases.map(x => `
+    active.length
+
+      ? active.map(x => `
+
           <option value="${Number(x.id)}">
+
             ${escapeHtml(x.reference)}
             -
             ${escapeHtml(x.first_name)}
             ${escapeHtml(x.last_name)}
+
           </option>
+
         `).join("")
+
       : '<option value="">Aucun bail actif</option>';
+
 }
 
 
+/* =========================================================
+   MODALS
+========================================================= */
+
 function openModal(id) {
+
   const modal =
     document.getElementById(id);
 
@@ -2231,39 +3688,57 @@ function openModal(id) {
 
   modal.classList.add("show");
 
+
   if (id === "propertyModal") {
+
     loadOwnerOptions()
       .catch(error => toast(error.message));
+
   }
+
 
   if (id === "leaseModal") {
+
     loadLeaseOptions()
       .catch(error => toast(error.message));
+
   }
 
+
   if (id === "paymentModal") {
+
     loadPaymentOptions()
       .catch(error => toast(error.message));
+
   }
+
 }
 
 
 function closeModals() {
+
   document
     .querySelectorAll(".modal")
     .forEach(modal => {
       modal.classList.remove("show");
     });
+
 }
 
 
+/* =========================================================
+   SECURITY
+========================================================= */
+
 function escapeHtml(value) {
+
   return String(value ?? "")
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 }
 
 
@@ -2271,213 +3746,279 @@ function escapeHtml(value) {
    FORMS
 ========================================================= */
 
-
 document
   .getElementById("ownerForm")
-  .addEventListener("submit", async event => {
+  .addEventListener(
+    "submit",
+    async event => {
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const data =
-      Object.fromEntries(
-        new FormData(event.target)
-      );
+      const data =
+        Object.fromEntries(
+          new FormData(event.target)
+        );
 
-    try {
+      try {
 
-      await api(
-        "/api/owners",
-        {
-          method: "POST",
-          body: JSON.stringify(data)
-        }
-      );
+        await api(
+          "/api/owners",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
 
-      closeModals();
-      event.target.reset();
+        event.target.reset();
 
-      toast("Propriétaire ajouté.");
+        closeModals();
 
-      await loadOwners();
+        toast("Propriétaire ajouté.");
 
-    } catch (error) {
+        await loadOwners();
+        await loadDashboard();
 
-      toast(error.message);
+      } catch (error) {
+
+        toast(error.message);
+
+      }
 
     }
-  });
+  );
 
 
 document
   .getElementById("propertyForm")
-  .addEventListener("submit", async event => {
+  .addEventListener(
+    "submit",
+    async event => {
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const data =
-      Object.fromEntries(
-        new FormData(event.target)
-      );
+      const data =
+        Object.fromEntries(
+          new FormData(event.target)
+        );
 
-    try {
+      try {
 
-      await api(
-        "/api/properties",
-        {
-          method: "POST",
-          body: JSON.stringify(data)
-        }
-      );
+        await api(
+          "/api/properties",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
 
-      closeModals();
-      event.target.reset();
+        event.target.reset();
 
-      toast("Bien ajouté.");
+        closeModals();
 
-      await loadProperties();
-      await refreshAll();
+        toast("Bien ajouté.");
 
-    } catch (error) {
+        await loadProperties();
+        await loadDashboard();
 
-      toast(error.message);
+      } catch (error) {
+
+        toast(error.message);
+
+      }
 
     }
-  });
+  );
 
 
 document
   .getElementById("tenantForm")
-  .addEventListener("submit", async event => {
+  .addEventListener(
+    "submit",
+    async event => {
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const data =
-      Object.fromEntries(
-        new FormData(event.target)
-      );
+      const data =
+        Object.fromEntries(
+          new FormData(event.target)
+        );
 
-    try {
+      try {
 
-      await api(
-        "/api/tenants",
-        {
-          method: "POST",
-          body: JSON.stringify(data)
-        }
-      );
+        await api(
+          "/api/tenants",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
 
-      closeModals();
-      event.target.reset();
+        event.target.reset();
 
-      toast("Locataire ajouté.");
+        closeModals();
 
-      await loadTenants();
-      await refreshAll();
+        toast("Locataire ajouté.");
 
-    } catch (error) {
+        await loadTenants();
+        await loadDashboard();
 
-      toast(error.message);
+      } catch (error) {
+
+        toast(error.message);
+
+      }
 
     }
-  });
+  );
 
 
 document
   .getElementById("leaseForm")
-  .addEventListener("submit", async event => {
+  .addEventListener(
+    "submit",
+    async event => {
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const data =
-      Object.fromEntries(
-        new FormData(event.target)
-      );
+      const data =
+        Object.fromEntries(
+          new FormData(event.target)
+        );
 
-    try {
+      try {
 
-      await api(
-        "/api/leases",
-        {
-          method: "POST",
-          body: JSON.stringify(data)
-        }
-      );
+        await api(
+          "/api/leases",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
 
-      closeModals();
-      event.target.reset();
+        event.target.reset();
 
-      toast("Bail créé.");
+        closeModals();
 
-      await loadLeases();
-      await loadProperties();
-      await refreshAll();
+        toast("Bail créé avec succès.");
 
-    } catch (error) {
+        await loadLeases();
+        await loadProperties();
+        await loadDashboard();
 
-      toast(error.message);
+      } catch (error) {
+
+        toast(error.message);
+
+      }
 
     }
-  });
+  );
 
 
 document
   .getElementById("paymentForm")
-  .addEventListener("submit", async event => {
+  .addEventListener(
+    "submit",
+    async event => {
 
-    event.preventDefault();
+      event.preventDefault();
 
-    const data =
-      Object.fromEntries(
-        new FormData(event.target)
-      );
+      const data =
+        Object.fromEntries(
+          new FormData(event.target)
+        );
 
-    try {
+      try {
 
-      await api(
-        "/api/payments",
-        {
-          method: "POST",
-          body: JSON.stringify(data)
-        }
-      );
+        await api(
+          "/api/payments",
+          {
+            method: "POST",
+            body: JSON.stringify(data)
+          }
+        );
 
-      closeModals();
-      event.target.reset();
+        event.target.reset();
 
-      toast("Loyer enregistré.");
+        closeModals();
 
-      await loadPayments();
-      await refreshAll();
+        toast("Loyer enregistré.");
 
-    } catch (error) {
+        await loadPayments();
+        await loadDashboard();
 
-      toast(error.message);
+      } catch (error) {
+
+        toast(error.message);
+
+      }
 
     }
-  });
+  );
 
 
 /* =========================================================
-   MODAL CLICK OUTSIDE
+   CLOSE MODAL ON OUTSIDE CLICK
 ========================================================= */
 
 document
   .querySelectorAll(".modal")
   .forEach(modal => {
 
-    modal.addEventListener("click", event => {
+    modal.addEventListener(
+      "click",
+      event => {
 
-      if (event.target === modal) {
-        modal.classList.remove("show");
+        if (event.target === modal) {
+          modal.classList.remove("show");
+        }
+
       }
-
-    });
+    );
 
   });
 
 
 /* =========================================================
-   INITIALISATION
+   REFRESH ALL
+========================================================= */
+
+async function refreshAll() {
+
+  try {
+
+    await loadDashboard();
+
+    await Promise.all([
+      loadProperties(),
+      loadOwners(),
+      loadTenants(),
+      loadLeases(),
+      loadPayments(),
+      loadNotifications(),
+      loadMessages()
+    ]);
+
+  } catch (error) {
+
+    console.error(error);
+
+    if (
+      error.message.includes("connecté") ||
+      error.message.includes("401")
+    ) {
+
+      showAuth();
+
+    }
+
+  }
+
+}
+
+
+/* =========================================================
+   START
 ========================================================= */
 
 checkSession();
@@ -2485,5 +4026,7 @@ checkSession();
 </script>
 
 </body>
+
 </html>
+
 `;
